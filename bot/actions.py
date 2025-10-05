@@ -105,6 +105,10 @@ class Creator:
 
 	def scrape_users(self,scraper, admin,creator_id,count=40,offset=0):
 		try:
+			Utils.write_log(f'Scraping users for creator {creator_id}...')
+			client_msg = {'msg':f'Scraping users for creator {creator_id}','status':'success','type':'message'}
+			success,msg = Utils.update_client(client_msg)
+
 			session = requests.Session()
 			session.headers.update(scraper.get('headers'))
 			session.cookies.update(scraper.get('cookies'))
@@ -162,7 +166,12 @@ class Creator:
 							user_messages = [msg for msg in messages if msg.get('recipient_id', None) == user.get('_id', None)]
 							if not user_messages:
 								valid_users.append(user)
-
+					
+					Utils.write_log(f'Found {len(valid_users)} valid users for creator {creator_id}')
+					client_msg = {'msg':f'Found {len(valid_users)} valid users for creator {creator_id}','status':'success','type':'message'}
+					success,msg = Utils.update_client(client_msg)
+					# with open ('users.json','w',encoding='utf-8') as f:
+					# 	json.dump(valid_users,f,ensure_ascii=False,indent=4)
 					return True, valid_users
 				else:
 					return False, 'No valid users found'
@@ -248,10 +257,15 @@ class Creator:
 				)
 
 				if not response.ok and response.status_code != 409:
-					raise Exception(f'User {user["name"]} already has a chat with {creator_name}')
+					client_msg = {'msg':f'Error sending message to {user["name"]}: by  {creator_name} {response.text}','status':'error','type':'message'}
+					success,msg = Utils.update_client(client_msg)
+
+					raise Exception(f'Error sending message to {user["name"]}: by  {creator_name} {response.text}')
+				
 				elif response.status_code == 409:
 					Utils.write_log(f'User {user["name"]} already has a chat with {creator_name}, skipping...')
 					continue
+				
 				message_id = response.json().get('_id', None)
 				message_key = response.json().get('user_key', None)
 
@@ -351,19 +365,19 @@ class Creator:
 					'with_user_pivot_interaction': 'true',
 				}
 
-			response = requests.get(
-				f"https://rest.4based.com/api/1.0/user/name/{user['details']['user']['name']}",
-				params=params,
-				headers=user.get('headers',{}),
-				cookies=user.get('cookies',{}),
-				proxies=proxies,
-				timeout=60
-			)
+				response = requests.get(
+					f"https://rest.4based.com/api/1.0/user/name/{user['details']['user']['name']}",
+					params=params,
+					headers=user.get('headers',{}),
+					cookies=user.get('cookies',{}),
+					proxies=proxies,
+					timeout=60
+				)
 
-			if response.status_code == 200:
-				user['id'] = creator_id
-				user['status'] = 'Online'
-				return True, user
+				if response.status_code == 200:
+					user['id'] = creator_id
+					user['status'] = 'Online'
+					return True, user
 				
 			json_data = {
 				'identifier': email,
