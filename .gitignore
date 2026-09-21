@@ -2,6 +2,7 @@
 *.db
 bot/creators.json
 venv
+.venv
 test.py
 proxies.txt
 flask_session

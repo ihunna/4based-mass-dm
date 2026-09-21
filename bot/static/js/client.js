@@ -79,17 +79,25 @@ const updateClient = (data) => {
         // console.log("Received data from tasks:", data);
     }else if (data.type === 'message'){
         const _console = document.getElementById("console");
-        
+        if (!_console) return;
+
         const li = document.createElement("li");
-        const msgType = data.status;
-        
-        li.innerHTML = data.msg;
-        li.classList.add(msgType)
-        
-        
-        const firstChild = _console.firstChild;
-        _console.appendChild(li); 
-        _console.scrollTop = _console.scrollHeight;
+        const rawMsg = String(data.msg ?? '');
+        li.innerHTML = rawMsg
+            .replace(/(?:<br\s*\/?>\s*){3,}/gi, '<br><br>')
+            .replace(/(\r?\n[ \t]*){3,}/g, '\n\n')
+            .trim();
+        li.classList.add(data.status);
+
+        const scroller = _console.parentElement;
+        const stickToBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48;
+        _console.appendChild(li);
+
+        if (stickToBottom) {
+            requestAnimationFrame(() => {
+                scroller.scrollTop = scroller.scrollHeight;
+            });
+        }
     }
 }
 

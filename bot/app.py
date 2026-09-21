@@ -1,7 +1,23 @@
-from schedule import Scheduler
 from app_configs import *
 from utils import Utils
 from actions import Creator,_4BASED
+
+success, msg = Utils.create_tables()
+if not success:
+    Utils.write_log(msg)
+
+def run_async_coroutine(coroutine):
+    """Run an async coroutine synchronously, handling existing event loops."""
+    try:
+        return asyncio.run(coroutine)
+    except RuntimeError as e:
+        if "cannot be called from a running event loop" in str(e):
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+                return future.result()
+            return loop.run_until_complete(coroutine)
+        raise
 
 @socketio.on('connect')
 def handle_connect():
@@ -11,6 +27,7 @@ def handle_connect():
 @app.before_request
 def before_request():
     g.host = host
+    g.app_prefix = app_prefix
 
 @app.after_request
 def after_request(response):
@@ -243,25 +260,17 @@ def handle_creators(action):
             success,msg = Utils.add_task(task_id,task_data)
             if not success:raise Exception(msg)
 
-            task = Thread(target=_4BASED().add_creators, 
-                args=(
-                    admin,
-                    task_data,
-                    creators,
-                    category
-                ))
-                
-            task.start()
+            def run_add_creators():
+                run_async_coroutine(_4BASED().add_creators(admin, task_data, creators, category))
+
+            task = socketio.start_background_task(run_add_creators)
             
             if task.is_alive():
                 success,msg = Utils.update_client({'msg':f'{task_id} successfully created','status':'success','type':'message'})
                 if not success:Utils.write_log(msg)
-                
-                else:
-                    Utils.write_log(msg)
-                    Utils.write_log(f'Task successflly created')
+                Utils.write_log(f'Task successflly created')
             
-                    return jsonify({'msg': f'Add {category} task successfully started'}), 200
+                return jsonify({'msg': f'Add {category} task successfully started'}), 200
                 
             else:return jsonify({'msg': f'Could not start task {task_id}'}), 400
         else:return jsonify({'msg':'No action specified'}),400
@@ -321,7 +330,7 @@ def creator():
             elif action == 'update-media-id':
                 post_id = data['post_id']
 
-                success,msg = Creator().update_media_id(post_id,creator)
+                success,msg = run_async_coroutine(Creator().update_media_id(post_id,creator))
                 if not success:
                     Utils.write_log(msg)
                     return jsonify({'msg':'Error updating user media id'}), 400
@@ -456,7 +465,8 @@ def handle_messages():
             'has_media': True if data.get('use-media', 'false').lower() == 'yes' else False,
             'media_id': data.get('media-id'),
             'admin': admin,
-            'time_between': int(data.get('time-between-actions', '3600'))
+            'time_between': int(data.get('time-between-actions', '3600')),
+            'proxy_flush': True if str(data.get('proxy-flush', 'no')).lower() == 'yes' else False
         }
 
         task_id = str(uuid.uuid4()).upper()[:8]
@@ -472,8 +482,10 @@ def handle_messages():
         success, msg = Utils.add_task(task_id, task_data)
         if not success:raise Exception(msg)
 
-        task = Thread(target=_4BASED().start_messaging, args=(task_data,int(data.get('max-workers', 10))))
-        task.start()
+        def run_start_messaging():
+            run_async_coroutine(_4BASED().start_messaging(task_data, int(data.get('max-workers', 10))))
+
+        task = socketio.start_background_task(run_start_messaging)
             
         if task.is_alive():
             success,msg = Utils.update_task(task_id,{
@@ -484,15 +496,131 @@ def handle_messages():
             
             success,msg = Utils.update_client({'msg':f'{task_id} successfully created','status':'success','type':'message'})
             if not success:Utils.write_log(msg)
-            
-            else:
-                Utils.write_log(msg)
-                Utils.write_log(f'Task successfully created')
-
-                return jsonify({'msg': f'Task successfully started'}), 200
+            Utils.write_log(f'Task successfully created')
+            return jsonify({'msg': f'Task successfully started'}), 200
             
         else:return jsonify({'msg': f'Could not start task {task_id}'}), 400
 
+    except Exception as error:
+        Utils.write_log(error)
+        abort(500)
+
+@app.route('/scraper', methods=['GET','POST'])
+@login_required
+def scraper():
+    try:
+        if request.method == 'GET':
+            g.page = 'scraper'
+            return render_template('messages.html', action='start-scraping')
+
+        admin = session['USER']['id']
+
+        if len(Utils.load_proxies()) < 1:
+            return jsonify({'msg': 'Proxies must not be empty'}), 400
+
+        success, tasks, _ = Utils.get_tasks(admin=admin, constraint='type', keyword='scraper')
+        if not success:raise Exception(tasks)
+        running_task = tasks[0] if len(tasks) > 0 else {'status': None}
+
+        if running_task['status'] in ['running', 'pending']:
+            success, msg = Utils.update_client({
+                'msg': 'Please wait for the current scraper task to finish or stop it before creating another',
+                'status': 'error',
+                'type': 'message'
+            })
+            if not success:Utils.write_log(msg)
+            return jsonify({'msg': 'A scraper task is already running. Please wait until it finishes.'}), 400
+
+        data = request.get_json()
+        scraper_data = {
+            'admin': admin,
+            'time_between': int(data.get('time-between-actions', '3600')),
+            'max_actions': int(data.get('max-actions', 10)),
+            'proxy_flush': True if str(data.get('proxy-flush', 'no')).lower() == 'yes' else False
+        }
+
+        task_id = str(uuid.uuid4()).upper()[:8]
+        task_data = {
+            'id': task_id,
+            'admin': admin,
+            'status': 'pending',
+            'action_count': data.get('action-count', 1),
+            'type': 'scraper',
+            'message': f'Creating task on {admin}',
+            'config': scraper_data
+        }
+        success, msg = Utils.add_task(task_id, task_data)
+        if not success:raise Exception(msg)
+
+        def run_start_scraping():
+            run_async_coroutine(_4BASED().start_scraping(task_data))
+
+        task = socketio.start_background_task(run_start_scraping)
+
+        if task.is_alive():
+            success, msg = Utils.update_task(task_id, {
+                'status': 'running',
+                'message': 'Started scraper'
+            })
+            if not success:Utils.write_log(msg)
+
+            success, msg = Utils.update_client({'msg': f'{task_id} successfully created', 'status': 'success', 'type': 'message'})
+            if not success:Utils.write_log(msg)
+            Utils.write_log('Task successfully created')
+            return jsonify({'msg': 'Task successfully started'}), 200
+
+        return jsonify({'msg': f'Could not start task {task_id}'}), 400
+
+    except Exception as error:
+        Utils.write_log(error)
+        abort(500)
+
+@app.route('/targets', methods=['GET'])
+@login_required
+def targets():
+    try:
+        category = request.args.get('category', 'all')
+        g.page = 'users'
+        page = request.args.get('page', 1, type=int)
+        per_page = 20
+        action = request.args.get('action')
+        admin = session['USER']['id']
+        offset = (page - 1) * per_page
+
+        if action == 'get-items':
+            item = request.args.get('item')
+            constraint = request.args.get('key')
+            if constraint == 'admin':
+                constraint, item = None, None
+            success, targets, total_targets = Utils.get_users(
+                admin=admin,
+                limit=per_page,
+                offset=offset,
+                constraint=constraint,
+                keyword=item
+            )
+        else:
+            success, targets, total_targets = Utils.get_users(
+                admin=admin, limit=per_page, offset=offset, category=category
+            )
+
+        if not success:
+            Utils.write_log(targets)
+            return render_template('view-item.html', action=404)
+
+        next_page = page + 1 if page < total_targets / per_page else page
+        prev_page = page - 1 if page > 1 else page
+        current_page = offset + len(targets)
+        return render_template(
+            'targets.html',
+            action=action,
+            targets=targets,
+            total_targets=total_targets,
+            next_page=next_page,
+            prev_page=prev_page,
+            current_page=current_page,
+            category=category
+        )
     except Exception as error:
         Utils.write_log(error)
         abort(500)
@@ -856,6 +984,13 @@ def delete(category):
 
                 deleted += 1
         
+        elif category == 'targets':
+            for item in data:
+                user_id = item['item']
+                success, msg = Utils.delete_user(user_id)
+                if not success:raise Exception(msg)
+                deleted += 1
+        
         return jsonify({'msg':f'Deleted {deleted} {category} successfully'}),200
     
     except Exception as error:
@@ -944,7 +1079,7 @@ def login():
 def handle_client_update():
     try:
         client_msg = request.get_json()
-        socketio.emit('update-client', client_msg,callback=True)
+        socketio.emit('update-client', client_msg, namespace='/')
         return jsonify({'msg':'client updated'}),200
     except Exception as error:
         return jsonify({'msg':f'{error}'}),400

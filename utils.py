@@ -35,11 +35,27 @@ class Utils:
 					
 				proxies.append(proxy)
 
+		if os.getenv('MITMWEB', '1').strip().lower() not in ('0', 'false', 'no'):
+			return [{
+				'http': 'http://127.0.0.1:8080',
+				'https': 'http://127.0.0.1:8080'
+			}]
 		return proxies
 	
 	@staticmethod
 	def get_proxy_cert(proxy_cert):
 		return os.path.join(root_dir,proxy_cert)
+
+	@staticmethod
+	def format_proxy(proxies):
+		if isinstance(proxies,dict):
+			return proxies['http']
+		elif isinstance(proxies,str) and 'http://' in proxies:
+			return {
+				'http':proxies,
+				'https':proxies
+			}
+		return None
 
 	@staticmethod
 	def generate_android_version():
@@ -156,6 +172,19 @@ class Utils:
 					caption TEXT,
 					price REAL DEFAULT 0,
 					created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+				)''')
+			
+			cursor.execute('''
+				CREATE TABLE IF NOT EXISTS users (
+					id TEXT PRIMARY KEY,
+					admin TEXT,
+					username TEXT,
+					commented_at TEXT,
+					task_id TEXT,
+					created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+					status TEXT DEFAULT 'active',
+					spent INTEGER DEFAULT 0,
+					category TEXT DEFAULT 'scraped'
 				)''')
 			
 			conn.commit()
@@ -797,12 +826,205 @@ class Utils:
 	@staticmethod
 	def update_client(client_msg):
 		try:
-			response = requests.post(f'{host}/update-client',json=client_msg)
-			update = response.json()
-			if not response.ok:raise Exception(f'Error updating client: {update["msg"]}')
-			return True,update['msg']
+			import sys
+			configs = sys.modules.get('app_configs') or sys.modules.get('bot.app_configs')
+			if configs is None:
+				try:
+					import app_configs as configs
+				except ImportError:
+					import bot.app_configs as configs
+			with configs.app.app_context():
+				configs.socketio.emit(
+					'update-client',
+					client_msg,
+					namespace='/',
+				)
+			return True, 'client updated'
 		except Exception as error:
 			return False,error
+
+	@staticmethod
+	def push_task_update(task, status, message, client_status=None):
+		if client_status is None:
+			client_status = 'error' if status in ['failed', 'canceled', 'cancelled'] else 'success'
+		success, msg = Utils.update_task(task['id'], {'status': status, 'message': message})
+		if not success:
+			Utils.write_log(msg)
+		task.update({
+			'status': status,
+			'message': message,
+			'updated': str(datetime.now())
+		})
+		success, msg = Utils.update_client({'msg': message, 'status': client_status, 'type': 'message'})
+		if not success:
+			Utils.write_log(msg)
+		success, msg = Utils.update_client({'task': task, 'type': 'task'})
+		if not success:
+			Utils.write_log(msg)
+		return True, message
+
+	@staticmethod
+	def add_user(user_id, admin, username, commented_at=None, task_id=None):
+		success, msg = False, ''
+		conn = sqlite3.connect(db_file)
+		cursor = conn.cursor()
+		try:
+			cursor.execute(
+				"INSERT INTO users (id, admin, username, commented_at, task_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+				(user_id, admin, username, commented_at, task_id)
+			)
+			conn.commit()
+			success, msg = True, 'User added successfully'
+		except Exception as error:
+			success, msg = False, str(f'Error adding user :{error}')
+		finally:
+			conn.close()
+			return success, msg
+
+	@staticmethod
+	def update_user(user_id, status):
+		success, msg = False, ''
+		conn = sqlite3.connect(db_file)
+		cursor = conn.cursor()
+		try:
+			cursor.execute("UPDATE users SET status = ? WHERE id = ?", (status, user_id))
+			conn.commit()
+			success, msg = True, 'User updated successfully'
+		except Exception as error:
+			success, msg = False, str(f'Error updating user :{error}')
+		finally:
+			conn.close()
+			return success, msg
+
+	@staticmethod
+	def delete_user(user_id):
+		success, msg = False, ''
+		conn = sqlite3.connect(db_file)
+		cursor = conn.cursor()
+		try:
+			cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+			conn.commit()
+			success, msg = True, 'User deleted successfully'
+		except Exception as error:
+			success, msg = False, str(error)
+		finally:
+			conn.close()
+			return success, msg
+
+	@staticmethod
+	def get_users(admin, limit=20, offset=0, constraint=None, keyword=None, category=None):
+		success, users, total_users = True, [], 0
+		conn = sqlite3.connect(db_file)
+		cursor = conn.cursor()
+		try:
+			if constraint is not None and keyword is not None:
+				cursor.execute(f"SELECT COUNT(*) FROM users WHERE {constraint} = ? AND admin = ?", (keyword, admin))
+				total_users = cursor.fetchone()[0]
+				cursor.execute(
+					f"""SELECT * FROM users
+					WHERE {constraint} = ? AND admin = ?
+					ORDER BY created_at DESC
+					LIMIT ? OFFSET ?""",
+					(keyword, admin, limit, offset)
+				)
+				rows = cursor.fetchall()
+			elif category in ['scraped', 'uploaded']:
+				cursor.execute("SELECT COUNT(*) FROM users WHERE admin = ? AND category = ?", (admin, category))
+				total_users = cursor.fetchone()[0]
+				cursor.execute(
+					"SELECT * FROM users WHERE admin = ? AND category = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+					(admin, category, limit, offset)
+				)
+				rows = cursor.fetchall()
+			else:
+				cursor.execute("SELECT COUNT(*) FROM users WHERE admin = ?", (admin,))
+				total_users = cursor.fetchone()[0]
+				cursor.execute(
+					"SELECT * FROM users WHERE admin = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+					(admin, limit, offset)
+				)
+				rows = cursor.fetchall()
+
+			users = [{
+				'id': row[0],
+				'admin': row[1],
+				'username': row[2],
+				'commented_at': row[3],
+				'task_id': row[4],
+				'created_at': row[5],
+				'status': row[6],
+				'spent': row[7],
+				'category': row[8]
+			} for row in rows]
+		except Exception as error:
+			success, users = False, str(error)
+		finally:
+			conn.close()
+			return success, users, total_users
+
+	@staticmethod
+	def get_existing_user_ids(user_ids, admin=None):
+		success, existing = True, []
+		conn = sqlite3.connect(db_file)
+		cursor = conn.cursor()
+		try:
+			if not user_ids:
+				return True, []
+			placeholders = ",".join(["?"] * len(user_ids))
+			params = list(user_ids)
+			if admin is not None:
+				query = f"SELECT id FROM users WHERE id IN ({placeholders}) AND admin = ?"
+				params.append(admin)
+			else:
+				query = f"SELECT id FROM users WHERE id IN ({placeholders})"
+			cursor.execute(query, params)
+			existing = [row[0] for row in cursor.fetchall()]
+		except Exception as error:
+			success, existing = False, str(error)
+		finally:
+			conn.close()
+			return success, existing
+
+	@staticmethod
+	def get_unmessaged_users(creator_id, limit=50, offset=0):
+		try:
+			conn = sqlite3.connect(db_file)
+			cursor = conn.cursor()
+			cursor.execute("""
+				SELECT u.id, u.username
+				FROM users u
+				WHERE u.status = 'active'
+				AND u.id NOT IN (
+					SELECT m.recipient_id
+					FROM messages m
+					WHERE m.creator_id = ?
+				)
+				ORDER BY u.created_at DESC
+				LIMIT ? OFFSET ?
+			""", (creator_id, limit, offset))
+			rows = cursor.fetchall()
+			conn.close()
+			users = [{'id': row[0], 'username': row[1]} for row in rows]
+			return True, users
+		except Exception as e:
+			return False, str(e)
+
+	@staticmethod
+	def add_users(users, admin=None, task_id=None):
+		try:
+			for user in users:
+				success, msg = Utils.add_user(
+					user.get('_id') or user.get('id'),
+					admin,
+					user.get('username') or user.get('name'),
+					user.get('commented_at'),
+					task_id=task_id
+				)
+				if not success:
+					return False, msg
+			return True, f'saved all {len(users)} users'
+		except Exception as error:
+			return False, error
 
 	@staticmethod
 	def check_values(values:list):

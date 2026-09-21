@@ -1,0 +1,80 @@
+{% extends "layout.html"%}
+{% block title %}
+    Targets
+{% endblock %}
+{%block main_content%}
+    <section class="targets">
+        <div class="alt-tab">
+            <a href="{{ url_for('creators', category='users') }}">Users <i class="fas fa-arrow-right"></i></a>
+        </div>
+        {%if targets|length > 0%}
+            <div class="holder table-container scroll scroll-v scroll-h" id="targets-table">
+                <div class="table-header">
+                    <div class="table-row">
+                    <div class="table-cell check-box">
+                        <input type="checkbox" id="check-all" onclick="selectAll(this,'targets-table')">
+                    </div>
+                    <div class="table-cell badge">Username</div>
+                    <div class="table-cell badge">Status</div>
+                    <div class="table-cell">Source</div>
+                    <div class="table-cell double-cell">Created at</div>
+                    <div class="table-cell actions">Actions</div>
+                    </div>
+                </div>
+               <div class="table-body">
+                    {%for target in targets%}
+                        <div
+                            class="table-row" data-item="{{target.id}}" data-action-target="{{target.id}}" id="{{target.id}}">
+                            <div class="table-cell check-box">
+                                <input type="checkbox" class="checkbox-row">
+                            </div>
+                            <div class="table-cell badge">
+                                <span class="bg-success">
+                                    {{target.username|capitalize}}
+                                </span>
+                            </div>
+                             <div class="table-cell badge">
+                                <span class="{%if target.status == 'active' %} bg-success {% elif target.status == 'inactive' %} bg-danger {% else %} bg-warning {% endif %}">
+                                    {{target.status}}
+                                </span>
+                            </div>
+                            <div class="table-cell">{{ target.category}}</div>
+                            <div class="table-cell double-cell">{{ target.created_at}}</div>
+                            <div class="table-cell actions">
+                                <ul class="actions-list">
+                                    <li data-action="delete" data-action-url="{{ url_for('delete', category='targets') }}"
+                                    data-action-message="Deleting target {{target.id}}"
+                                    data-item="{{target.id}}" data-action-target="{{target.id}}"
+                                    onclick="handleAction(this,'targets-table','single')">
+                                        <i class="fas fa-trash text-danger"></i>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    {%endfor%}
+                    <div class="table-row table-bottom">
+                            <div class="bottom-actions show">
+                                <div data-action="delete" data-action-url="{{ url_for('delete', category='targets') }}"
+                                    data-action-message="Deleting targets"
+                                    class="action delete bg-danger light" onclick="handleAction(this,'targets-table','multiple')">
+                                    Delete
+                                </div>
+                            </div>
+                        <div class="bottom-nav">
+                            <div class="sum-total">{{ current_page}} / {{total_targets}}</div>
+                            <div class="more-less">
+                                <a href="{{ url_for('targets', page=prev_page, category=category) | safe}}">
+                                    <i class="fas fa-chevron-left"></i>
+                                </a>
+                                &nbsp; &nbsp;
+                                <a href="{{ url_for('targets', page=next_page, category=category) | safe}}">
+                                    <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {%endif%}
+    </section>
+{%endblock%}

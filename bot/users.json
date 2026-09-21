@@ -1,0 +1,101 @@
+[
+    {
+        "_id": "68e158fe36852a6dc5008144",
+        "name": "browncock",
+        "ext_id": "64c50c3f77133cef78075fd3",
+        "locale": "de",
+        "cold_communication_status": "passively_not_contactable",
+        "ext_id_created_at": "2025-10-04 17:27:26",
+        "following_count": 2,
+        "is_online": true
+    },
+    {
+        "_id": "68e15233a1134745a900bc08",
+        "name": "arjzzzzzz",
+        "ext_id": "61c71e0341dcf47a534c6909",
+        "follow_ext_id": "61c71e0341dcf47a534c6909",
+        "locale": "en",
+        "cold_communication_status": "passively_not_contactable",
+        "ext_id_created_at": "2025-10-04 16:58:27",
+        "following_count": 2,
+        "is_online": true
+    },
+    {
+        "_id": "68e152958c7844692708d664",
+        "name": "cirojionta",
+        "ext_id": "66da1798811305655b03526a",
+        "locale": "en",
+        "cold_communication_status": "passively_not_contactable",
+        "ext_id_created_at": "2025-10-04 17:00:05",
+        "following_count": 3,
+        "is_online": true
+    },
+    {
+        "_id": "68e1560a21763bc7bf05da79",
+        "name": "dizer",
+        "ext_id": "65c9fe37018f70e6dc0bf686",
+        "locale": "de",
+        "cold_communication_status": "passively_not_contactable",
+        "ext_id_created_at": "2025-10-04 17:14:50",
+        "following_count": 3,
+        "is_online": true
+    },
+    {
+        "_id": "68e2c5868c172f0c1a0859e8",
+        "name": "normanjr",
+        "ext_id": "63b2ae9c3e53efb8d7102a60",
+        "locale": "de",
+        "cold_communication_status": "passively_contactable",
+        "ext_id_created_at": "2025-10-05 19:22:46",
+        "following_count": 2,
+        "is_online": true
+    },
+    {
+        "_id": "68e2b07913bf011f580e44b6",
+        "name": "bernd147",
+        "locale": "de",
+        "cold_communication_status": "passively_not_contactable",
+        "following_count": 2,
+        "is_online": true
+    },
+    {
+        "_id": "68e29e00dd2ad69b4b023b54",
+        "name": "e_e_r",
+        "ext_id": "643bde040fc45ee5c11071c6",
+        "locale": "en",
+        "cold_communication_status": "passively_not_contactable",
+        "ext_id_created_at": "2025-10-05 16:34:08",
+        "following_count": 2,
+        "is_online": true
+    },
+    {
+        "_id": "68e2825fd46d17dc1a079ad2",
+        "name": "frankperez",
+        "ext_id": "620c36463d23bb7b663bdb0d",
+        "locale": "es",
+        "cold_communication_status": "passively_not_contactable",
+        "ext_id_created_at": "2025-10-05 14:36:15",
+        "following_count": 2,
+        "is_online": true
+    },
+    {
+        "_id": "68e246d0887e3d3f9f042fa0",
+        "name": "patryk204",
+        "ext_id": "63af2fe32020258e0209ee08",
+        "locale": "de",
+        "cold_communication_status": "passively_not_contactable",
+        "ext_id_created_at": "2025-10-05 10:22:08",
+        "following_count": 2,
+        "is_online": true
+    },
+    {
+        "_id": "68e17aaa0ed9d54ec607a71f",
+        "name": "random234567",
+        "ext_id": "674abb8823ff69666103b398",
+        "locale": "en",
+        "cold_communication_status": "passively_not_contactable",
+        "ext_id_created_at": "2025-10-04 19:51:06",
+        "following_count": 2,
+        "is_online": true
+    }
+]

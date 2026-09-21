@@ -1,73 +1,11 @@
 {
-    "user_ids": [
-        "6894f97e91f8959c610c357f",
-        "6682e25e782f928fe201f2f8"
-    ],
-    "user_key": "6682e25e782f928fe201f2f8:6894f97e91f8959c610c357f",
-    "updated_at": "2025-08-07 21:01:06",
-    "created_at": "2025-08-07 21:01:06",
-    "_id": "68951412ce0cb9a6890d695a",
-    "users": [
-        {
-            "_id": "6894f97e91f8959c610c357f",
-            "name": "amadocarillo",
-            "ext_id": "6894d5c22a024c229504dedc",
-            "locale": "en",
-            "cold_communication_status": "passively_contactable",
-            "ext_id_created_at": "2025-08-07 19:07:42",
-            "following_count": 2,
-            "has_subscription_configuration": false,
-            "subscribed_user_ids": [],
-            "subscriber_user_ids": [],
-            "avatar": null,
-            "follow_user_ids": []
-        },
-        {
-            "_id": "6682e25e782f928fe201f2f8",
-            "name": "jenny.ried",
-            "locale": "en",
-            "following_count": 7,
-            "content_language": "en",
-            "verified": true,
-            "allow_partnership": true,
-            "follower_count": 291,
-            "file_stack_count": 1005,
-            "file_stack_individual_sale_item_count": 995,
-            "file_stack_subscription_item_count": 10,
-            "file_stack_subscription_item_image_count": 7,
-            "file_stack_subscription_item_video_count": 3,
-            "media_language": "de",
-            "likes_count": 3004,
-            "cold_communication_status": "actively_not_contactable",
-            "private": true,
-            "allow_search_engine_indexing": true,
-            "has_subscription_configuration": true,
-            "subscribed_user_ids": [],
-            "subscriber_user_ids": [],
-            "avatar": {
-                "_id": "67dd2ad5cb1daf29190c4b02",
-                "code": "natmn4rhs4zoh6td",
-                "status": "available",
-                "categories": [
-                    "avatar"
-                ],
-                "type": "image/jpeg",
-                "fileStackType": "image",
-                "user_id": "6682e25e782f928fe201f2f8",
-                "extension": "jpeg",
-                "width": 523,
-                "height": 522,
-                "dominantColor": [
-                    137,
-                    131,
-                    119
-                ],
-                "status_media_controlled": "ok",
-                "status_controlled": "ok",
-                "filesystem_added": true,
-                "own": true
-            },
-            "follow_user_ids": []
-        }
-    ]
+    "chat_id": "68c465ca71b552e24d0ed1d2",
+    "user_id": "66644dfe2ece041ec40805d7",
+    "message": "Hello, are you a creator looking to boost your sales?",
+    "sender_status": "sent",
+    "local_id": "44f781ce-6a41-93e9-791b-c12bed6337ac",
+    "updated_at": "2025-09-13 04:36:59",
+    "created_at": "2025-09-13 04:36:59",
+    "_id": "68c4f4ebf333d5c7f30e0ead",
+    "file_stack": null
 }

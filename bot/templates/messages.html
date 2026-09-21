@@ -61,6 +61,9 @@
     {%if action == 'start-messaging'%}
         <section class="add-message">
             <div class="holder form-holder">
+                    <div class="alt-tab">
+                        <a href="{{ url_for('scraper') }}">Scraper <i class="fas fa-arrow-right"></i></a>
+                    </div>
                 <form action="" id="messages-form" data-action="Create message" 
                     data-action-url="/start-messaging" data-action-message="Creating message..." 
                     data-next-action-url="/tasks">
@@ -110,7 +113,18 @@
                             <input type="number" id="max-workers" name="max-workers" value="10" max="50" autofocus tocomplete="delay" required>
                             <label for="max-workers">Number of concurrent actions</label>
                         </div>
-                        <div class="input-container">
+                        <div class="input-container flex radio">
+                            <span style="padding: 0; margin: 0 auto 0 0;">
+                                Proxy flush
+                            </span>
+                            <div class="radio-box">
+                                <input type="radio" class="proxy-flush" id="proxy-flush-yes" name="proxy-flush" value="yes">
+                                <label for="proxy-flush-yes">Yes</label>
+                            </div>
+                            <div class="radio-box">
+                                <input type="radio" class="proxy-flush" id="proxy-flush-no" name="proxy-flush" value="no" checked>
+                                <label for="proxy-flush-no">No</label>
+                            </div>
                         </div>
                     </div>
                     <div class="message-holder">
@@ -297,6 +311,60 @@
                 });
             }
         </script>
+    {%elif action == 'start-scraping'%}
+        <section class="add-scraper">
+            <div class="holder form-holder">
+                <div class="alt-tab">
+                    <a href="{{ url_for('messages', action='start-messaging') }}">Messanger <i class="fas fa-arrow-right"></i></a>
+                </div>
+                <form action="" id="scraper-form" data-action="Scrape accounts"
+                    data-action-url="{{ url_for('scraper') }}" data-action-message="Starting scraper..."
+                    data-next-action-url="{{ url_for('tasks') }}">
+                    <h3 class="form-header">
+                        Fill the form to start scraping users.
+                    </h3>
+                    <div class="u-settings input-container">
+                        <div class="input-container">
+                            <select name="time-between-actions" id="time-between-actions" required>
+                                <option value="">Time between actions</option>
+                                <option value="60">1 minute</option>
+                                <option value="120">2 minutes</option>
+                                <option value="180">3 minutes</option>
+                                <option value="300">5 minutes</option>
+                                <option value="600">10 minutes</option>
+                                <option value="1200">20 minutes</option>
+                                <option value="1800">30 minutes</option>
+                                <option value="3600">1 hour</option>
+                                <option value="7200">2 hours</option>
+                                <option value="10800">3 hours</option>
+                                <option value="21600">6 hours</option>
+                                <option value="86400">24 hours</option>
+                            </select>
+                        </div>
+                        <div class="input-container max-actions">
+                            <input type="number" id="max-actions" name="max-actions" value="10" max="50" autofocus tocomplete="delay" required>
+                            <label for="max-actions">Number of accounts per iteration</label>
+                        </div>
+                        <div class="input-container flex radio">
+                            <span style="padding: 0; margin: 0 auto 0 0;">
+                                Proxy flush
+                            </span>
+                            <div class="radio-box">
+                                <input type="radio" class="proxy-flush" id="scraper-proxy-flush-yes" name="proxy-flush" value="yes">
+                                <label for="scraper-proxy-flush-yes">Yes</label>
+                            </div>
+                            <div class="radio-box">
+                                <input type="radio" class="proxy-flush" id="scraper-proxy-flush-no" name="proxy-flush" value="no" checked>
+                                <label for="scraper-proxy-flush-no">No</label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="input-container flex">
+                        <input type="submit" value="Submit">
+                    </div>
+                </form>
+            </div>
+        </section>
     {%else%}
         {%if messages|length > 0%}
             <section class="messages">
