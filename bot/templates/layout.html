@@ -14,14 +14,14 @@
                 </ul>
             </div>
             <div class="footer">
-                <a href="/logs" class="link">
+                <a href="{{ url_for('logs') }}" class="link">
                     logs
                 </a>
                 <div class="link" id="clear-console">
                     clear console
                 </div>
                 <div class="link" id="logout"
-                    data-action="logout" data-action-url="/logout" data-action-message="Logging you out...">
+                    data-action="logout" data-action-url="{{ url_for('do_logout') }}" data-action-message="Logging you out...">
                   <i class="fas fa-sign-out"></i> &nbsp; logout
                 </div>
             </div>
@@ -30,42 +30,42 @@
             <div class="navbar scroll scroll-h">
                 <ul>
                     <li class="{%if g.page == 'dashboard'%} active {%endif%}">
-                        <a href="/">
+                        <a href="{{ url_for('index') }}">
                             <i class="fas fa-chart-pie"></i> Overview
                         </a>
                     </li>
                     <li class="{%if g.page in ['start-messaging','start-scraping','scraper']%} active {%endif%}">
-                        <a href="/messages?action=start-messaging">
+                        <a href="{{ url_for('messages', action='start-messaging') }}">
                             <i class="fas fa-plus"></i> New task
                         </a>
                     </li>
                     <li class="{%if g.page == 'messages'%} active {%endif%}">
-                        <a href="/messages">
+                        <a href="{{ url_for('messages') }}">
                             <i class="fas fa-envelope"></i> Messages
                         </a>
                     </li>
                     <li class="{%if g.page == 'tasks'%} active {%endif%}">
-                        <a href="/tasks">
+                        <a href="{{ url_for('tasks') }}">
                             <i class="fas fa-tasks"></i> Tasks
                         </a>
                     </li>
                     <li class="{%if g.page == 'creators'%} active {%endif%}">
-                        <a href="/creators">
+                        <a href="{{ url_for('creators') }}">
                             <i class="fas fa-user"></i> Creators
                         </a>
                     </li>
                      <li class="{%if g.page == 'users'%} active {%endif%}">
-                        <a href="/creators?category=users">
+                        <a href="{{ url_for('creators', category='users') }}">
                             <i class="fas fa-user"></i> users
                         </a>
                     </li>
                     <li class="{%if g.page in ['admins','edit-admin']%} active {%endif%}">
-                        <a href="/admins">
+                        <a href="{{ url_for('admins') }}">
                             <i class="fas fa-user"></i> Admins
                         </a>
                     </li>
                     <li class="{%if g.page == 'configs'%} active {%endif%}">
-                        <a href="/configs">
+                        <a href="{{ url_for('configs') }}">
                             <i class="fas fa-cog"></i> Configs
                         </a>
                     </li>
@@ -82,7 +82,7 @@
             </div>
         </div>
     </div>
-    <script src="{{ url_for('static', filename='js/settings.js') }}?v=reset-offset-3"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=app-prefix-1"></script>
     <script>
         
         const clearConsoleBtn = document.getElementById('clear-console');
@@ -117,7 +117,7 @@
                     setTimeout(() => {
                         toogleLoader('no-show');
                         setTimeout(() => {
-                            window.location.href = '/login';
+                            window.location.href = window.appUrl('/login');
                         }, 700);
                     }, 3000);
                 } else {

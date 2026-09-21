@@ -61,13 +61,83 @@ app_prefix = (os.getenv('APP_PREFIX') or '').rstrip('/')
 app_name = os.getenv('APP_NAME') or '4based'
 app_logo = os.getenv('APP_LOGO') or 'img/logo.png'
 
+
+class PrefixMiddleware:
+    """Keep Flask routes at /login while public URLs stay under APP_PREFIX.
+
+    Works if nginx strips /maloum (or /4based) and if it forwards the full path.
+    SCRIPT_NAME must be set here, not in before_request — Flask builds url_for
+    from the WSGI environ before before_request runs.
+    """
+
+    def __init__(self, wsgi_app, prefix):
+        self.wsgi_app = wsgi_app
+        self.prefix = (prefix or '').rstrip('/')
+
+    def __call__(self, environ, start_response):
+        prefix = self.prefix
+        if not prefix:
+            return self.wsgi_app(environ, start_response)
+        path = environ.get('PATH_INFO') or ''
+        if path == prefix or path.startswith(prefix + '/'):
+            environ['SCRIPT_NAME'] = (environ.get('SCRIPT_NAME') or '') + prefix
+            environ['PATH_INFO'] = path[len(prefix):] or '/'
+        else:
+            environ['SCRIPT_NAME'] = prefix
+        return self.wsgi_app(environ, start_response)
+
+
+_PREFIXED_ATTR = re.compile(
+    r'''\b(href|src|action|data-action-url|data-next-action-url|data-action-next-url)=(['"])(/(?!/)[^'"]*)\2'''
+)
+_PREFIXED_JS_LOC = re.compile(
+    r'''window\.location\.href\s*=\s*(['"`])(/[^'"`]*)\1'''
+)
+
+
+def _needs_prefix(path, prefix):
+    return bool(
+        prefix
+        and path.startswith('/')
+        and not path.startswith('//')
+        and path != prefix
+        and not path.startswith(prefix + '/')
+    )
+
+
+def _apply_app_prefix(response, prefix):
+    if not prefix:
+        return response
+    location = response.headers.get('Location')
+    if location and _needs_prefix(location, prefix):
+        response.headers['Location'] = prefix + location
+    content_type = (response.content_type or '').split(';')[0].strip().lower()
+    if content_type != 'text/html' or response.direct_passthrough:
+        return response
+    html = response.get_data(as_text=True)
+
+    def repl_attr(match):
+        path = match.group(3)
+        if not _needs_prefix(path, prefix):
+            return match.group(0)
+        return f'{match.group(1)}={match.group(2)}{prefix}{path}{match.group(2)}'
+
+    def repl_js(match):
+        path = match.group(2)
+        if not _needs_prefix(path, prefix):
+            return match.group(0)
+        return f'window.location.href = {match.group(1)}{prefix}{path}{match.group(1)}'
+
+    response.set_data(_PREFIXED_JS_LOC.sub(repl_js, _PREFIXED_ATTR.sub(repl_attr, html)))
+    return response
+
 # Configure application
 app = Flask(__name__)
 app.debug = True
 CORS(app, origins='*')
 socketio = SocketIO(
     app,
-    path=f'{app_prefix}/socket.io',
+    path='socket.io',
     async_mode='threading',
     cors_allowed_origins='*',
     transports=['polling'],
@@ -89,6 +159,12 @@ if app_prefix:
     app.config["APPLICATION_ROOT"] = app_prefix
     app.config["SESSION_COOKIE_PATH"] = app_prefix
 Session(app)
+if app_prefix:
+    app.wsgi_app = PrefixMiddleware(app.wsgi_app, app_prefix)
+
+@app.after_request
+def prefix_app_paths(response):
+    return _apply_app_prefix(response, app_prefix)
 
 @app.template_filter('date')
 def date_filter(value):

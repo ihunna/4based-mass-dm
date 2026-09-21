@@ -7,6 +7,25 @@
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap">
         <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
         <title>{% block title %}{% endblock %}</title>
+        <script>
+            window.APP_PREFIX = {{ (g.app_prefix or '')|tojson }};
+            (function () {
+                const prefix = window.APP_PREFIX || '';
+                function appUrl(url) {
+                    if (!prefix || typeof url !== 'string') return url;
+                    if (/^(https?:)?\/\//i.test(url)) return url;
+                    if (url === prefix || url.startsWith(prefix + '/')) return url;
+                    if (url.startsWith('/')) return prefix + url;
+                    return url;
+                }
+                window.appUrl = appUrl;
+                const origFetch = window.fetch;
+                window.fetch = function (input, init) {
+                    if (typeof input === 'string') input = appUrl(input);
+                    return origFetch.call(this, input, init);
+                };
+            })();
+        </script>
     </head>
     <body>
         {% block content %}{% endblock %}

@@ -26,8 +26,6 @@ def handle_connect():
     
 @app.before_request
 def before_request():
-    if app_prefix:
-        request.environ['SCRIPT_NAME'] = app_prefix
     g.host = host
     g.app_prefix = app_prefix
     g.app_name = app_name

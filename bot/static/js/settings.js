@@ -390,7 +390,7 @@ const search = async (searchForm,searchOffset,page,order) =>{
         }
     }
 
-    const response = await fetch('/search', requestParams);
+    const response = await fetch((window.appUrl || ((u) => u))('/search'), requestParams);
     if (response.ok) {
         responseData = await response.json();
         const results = responseData.results;

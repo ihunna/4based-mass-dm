@@ -5,7 +5,7 @@
 
 {%block content%}
     <div class="main-container">
-        <form action="" id="login-form" data-action="Login" data-action-url="/login" data-action-message="Logging you in">
+        <form action="{{ url_for('login') }}" id="login-form" data-action="Login" data-action-url="{{ url_for('login') }}" data-action-message="Logging you in">
             <h1>Login to admin account</h1>
             <div class="input-container">
                 <input type="email" id="email" name="email" autofocus required>
@@ -16,7 +16,7 @@
                 <label for="password">Enter admin password</label>
             </div>
             <div class="input-container">
-               <a href="/signup" style="color: #03ab8c;">signup</a>
+               <a href="{{ url_for('signup') }}" style="color: #03ab8c;">signup</a>
             </div>
             <div class="input-container">
                 <input type="submit" value="Login">
@@ -75,7 +75,7 @@
                     setTimeout(() => {
                         toogleLoader('no-show');
                         setTimeout(() => {
-                            window.location.href = '/';
+                            window.location.href = "{{ url_for('index') }}";
                         }, 700);
                     }, 3000);
                 } else {
