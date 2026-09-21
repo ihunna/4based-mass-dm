@@ -6,7 +6,7 @@
     <section class="creator">
         <div class="details">
             <ul class="main">
-                <li class="name">@{{creator.name}}</li>
+                <li class="name">@{{creator.get('name') or creator.get('username')}}</li>
                 <li class="tags">
                     {%if creator.verification_status%}
                         {%set v_status = creator.verification_status%}
@@ -20,12 +20,12 @@
                         {{creator.status}}
                     </div>
                 </li>
-                <li><span>Email:</span> {{creator.identifier}}</li>
+                <li><span>Email:</span> {{creator.get('identifier') or creator.get('email')}}</li>
                 <li><span>User ID:</span> {{creator._id}}</li>
                
                 <li class="double roles">
                     <span>Roles:</span>
-                    {%for role in creator.roles%}
+                    {%for role in creator.get('roles', [])%}
                         <div>({{role.name}})</div>
                     {%endfor%}
                 </li>
@@ -70,28 +70,31 @@
                         <span>
                             Priced posts
                         </span>
-                        {%set data_count = creator.fileStackWithPriceCount%}
+                        {%set data_count = creator.get('fileStackWithPriceCount', 0) or 0%}
                         <div class="
                             {%if data_count >= 10%}
                             bg-success
                             {%elif data_count == 0%}bg-danger
                             {%else%} bg-warning
                             {%endif%}">
-                            {{creator.fileStackWithPriceCount}}
+                            {{data_count}}
                         </div>
                     </li>
                     <li class="double">
                         <span>
                             Earnings
                         </span>
-                        {%set data_count = creator.coins%}
+                        {%set data_count = creator.get('coins', 0) or 0%}
+                        {%if data_count is mapping%}
+                            {%set data_count = data_count.get('total', 0) or 0%}
+                        {%endif%}
                         <div class="
                             {%if data_count >= 10%}
                             bg-success
                             {%elif data_count == 0%}bg-danger
                             {%else%} bg-warning
                             {%endif%}">
-                            {{creator.coins}}
+                            {{data_count}}
                         </div>
                     </li>
                     <li class="double">
@@ -157,6 +160,10 @@
                     {%endif%}
                   </div>
             </div>
+            <form action="/creator" id="reset-offset-form">
+                <input type="hidden" value="{{creator_id}}" name="creator-id">
+                <button type="submit" class="bg-success">Reset offset</button>
+            </form>
             <form action="/creator" id="update-media-form">
                 <input type="text" value="{{post_id}}" name="post-id">
                 <input type="hidden" value="{{creator_id}}" name="creator-id">
@@ -164,8 +171,10 @@
             </form>
             <script>
                 document.addEventListener('DOMContentLoaded', function() {
-                    const form = document.getElementById('update-media-form');
-                    if (form) updateMediaId(form);
+                    const updateMediaIdForm = document.getElementById('update-media-form');
+                    const resetOffsetForm = document.getElementById('reset-offset-form');
+                    if (resetOffsetForm) resetOffset(resetOffsetForm);
+                    if (updateMediaIdForm) updateMediaId(updateMediaIdForm);
                 });
             </script>
         </div>

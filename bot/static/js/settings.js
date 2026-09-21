@@ -87,7 +87,7 @@ const toogleGridActions = (toolTip) => {
 
 const handleAction = (btn,parent, actionType,view) => {
     const items = [];
-    if (actionType === 'download'){
+        if (actionType === 'download'){
         const section = document.getElementById(parent);
         const hoverList = section.querySelector('.hover-list');
         const ul = hoverList.querySelector('.ul');
@@ -117,6 +117,24 @@ const handleAction = (btn,parent, actionType,view) => {
             },{once:true})
         }
     }else{
+        if (actionType === 'reset-all'){
+            const action = btn.getAttribute('data-action');
+            const actionUrl = btn.getAttribute('data-action-url');
+            const actionMsg = btn.getAttribute('data-action-message');
+            const count = btn.getAttribute('data-action-count') || 'all';
+            const tableEl = document.getElementById(parent);
+            const auth = tableEl ? tableEl.getAttribute('data-auth') : null;
+            showDialogue(
+                `Do you really want to reset offset for all ${count} creators?`,
+                action,
+                actionUrl,
+                [],
+                actionMsg,
+                auth,
+                {all: true}
+            );
+            return;
+        }
 
         if (actionType === 'multiple'){
             const table = document.getElementById(parent);
@@ -167,11 +185,16 @@ const handleAction = (btn,parent, actionType,view) => {
         const action = btn.getAttribute('data-action');
         const actionUrl = btn.getAttribute('data-action-url');
         const actionMsg = btn.getAttribute('data-action-message');
-        const auth =  document.getElementById(parent).getAttribute('data-auth')
+        const tableEl = document.getElementById(parent);
+        const auth = tableEl ? tableEl.getAttribute('data-auth') : null;
+
         if (items.length > 0){
             let dialogue = actionType == 'single'? `Do you really want to ${action} this item?`
             : `Do you really want to ${action} ${items.length} items?`
            showDialogue(dialogue,action,actionUrl,items,actionMsg,auth);
+        } else if (actionType === 'multiple'){
+            toogleLoader('show', 'Select at least one item first','error');
+            setTimeout(()=> toogleLoader('no-show'),3000);
         }
     }
 
@@ -180,7 +203,8 @@ const handleAction = (btn,parent, actionType,view) => {
 const rows = document.querySelectorAll('.table-row');
 rows.forEach(row => {
     row.addEventListener('click', e => {
-        if (!e.target.closest('.actions') && !e.target.closest('.check-box')) {
+        if (row.classList.contains('table-bottom')) return;
+        if (!e.target.closest('.actions') && !e.target.closest('.check-box') && !e.target.closest('.bottom-actions')) {
             const actionUrl = row.getAttribute('data-action-url');
             if (actionUrl) {
                 window.location.href = actionUrl;
@@ -189,7 +213,7 @@ rows.forEach(row => {
     });
 });
 
-const showDialogue = (dialogue,action=String,actionUrl=String,items=Array,actionMsg=String,auth=String) => {
+const showDialogue = (dialogue,action=String,actionUrl=String,items=Array,actionMsg=String,auth=String,extra={}) => {
   const dialogueHolder = document.getElementById('dialogue-holder');
   const dialogueMsg = dialogueHolder.querySelector('.dialogue-msg');
   const dialogueAction = dialogueHolder.querySelector('.dialogue-action');
@@ -214,7 +238,7 @@ const showDialogue = (dialogue,action=String,actionUrl=String,items=Array,action
     
     dialogueAction.addEventListener('click', () => {
         const nextAction = action === 'stop'? 'no-reload':'reload'
-        sendRequest('POST',action,actionUrl,actionMsg,{'data':items},auth,nextAction)
+        sendRequest('POST',action,actionUrl,actionMsg,Object.assign({'data':items}, extra),auth,nextAction)
         showHide('no-show',[dialogueHolder]);
     },{once:true});
 }
@@ -423,6 +447,38 @@ const search = async (searchForm,searchOffset,page,order) =>{
             console.error(response.statusText);
         }
     }
+}
+
+const resetOffset = (form) => {
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const formData = new FormData(form);
+        const creatorId = formData.get('creator-id');
+        const actionUrl = form.getAttribute('action') || '/creator';
+
+        try {
+            toogleLoader('show', 'Resetting offset...');
+            const response = await fetch(actionUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'reset-offset',
+                    creator: creatorId
+                })
+            });
+            const responseData = await response.json();
+            if (response.ok) {
+                toogleLoader('show', responseData.msg || 'Offset reset successfully', 'success');
+            } else {
+                toogleLoader('show', responseData.msg || 'Failed to reset offset', 'error');
+            }
+            setTimeout(() => toogleLoader('no-show'), 3000);
+        } catch (error) {
+            toogleLoader('show', 'Error resetting offset', 'error');
+            setTimeout(() => toogleLoader('no-show'), 3000);
+            console.error('Error resetting offset:', error);
+        }
+    });
 }
 
 const updateMediaId = (form) => {

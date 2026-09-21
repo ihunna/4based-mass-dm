@@ -58,6 +58,8 @@ session_key = os.getenv('SECRET_KEY')
 server_key = os.getenv('SERVER_KEY')
 host = os.getenv('HOST')
 app_prefix = os.getenv('APP_PREFIX') or ''
+app_name = os.getenv('APP_NAME') or '4based'
+app_logo = os.getenv('APP_LOGO') or 'img/logo.png'
 
 # Configure application
 app = Flask(__name__)

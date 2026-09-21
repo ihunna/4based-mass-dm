@@ -1090,13 +1090,31 @@ select[multiple]::-webkit-scrollbar-thumb {
 }
 
 .main-container > aside > .title{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     margin: 5px auto 0 auto;
-    height: 30px;
+    min-height: 30px;
+    height: auto;
     width: 90%;
     background: var(--primary);
-    padding: 3px;
+    padding: 5px 8px;
     text-align: center;
     flex-shrink: 0;
+    overflow: hidden;
+}
+.main-container > aside > .title .app-logo{
+    height: 18px;
+    width: 18px;
+    object-fit: contain;
+    flex-shrink: 0;
+    border-radius: 4px;
+}
+.main-container > aside > .title span{
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .main-container > aside > .content{
     margin: 0 auto;

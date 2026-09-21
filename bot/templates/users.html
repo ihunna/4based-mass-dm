@@ -33,7 +33,7 @@
                     {%for creator in creators%}
                         {%set creator_data = creator.data%}
                         {%set creator_details = creator_data.details.user%}
-                        <div data-action-url="{{ url_for('creator',action='view-item',creator=creator.id) }}" 
+                        <div data-action-url="{{ url_for('creator',action='view-item',creator=creator.id,category='users') }}" 
                             class="table-row" data-item="{{creator.id}}" data-action-target="{{creator.id}}" id="{{creator.id}}">
                             <div class="table-cell check-box">
                                 <input type="checkbox" class="checkbox-row">

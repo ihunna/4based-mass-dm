@@ -28,6 +28,11 @@ def handle_connect():
 def before_request():
     g.host = host
     g.app_prefix = app_prefix
+    g.app_name = app_name
+    if app_logo.startswith(('http://', 'https://', '/')):
+        g.app_logo = app_logo
+    else:
+        g.app_logo = url_for('static', filename=app_logo)
 
 @app.after_request
 def after_request(response):
@@ -273,6 +278,43 @@ def handle_creators(action):
                 return jsonify({'msg': f'Add {category} task successfully started'}), 200
                 
             else:return jsonify({'msg': f'Could not start task {task_id}'}), 400
+        elif action == 'reset-offset':
+            payload = request.get_json(silent=True) or {}
+            if payload.get('all'):
+                admin = session['USER']['id']
+                success, msg, reset = Utils.reset_creator_offsets(admin, category='creators')
+                if not success:
+                    Utils.write_log(msg)
+                    return jsonify({'msg': 'Could not reset creator offsets'}), 400
+                if reset < 1:
+                    return jsonify({'msg': 'No creators to reset'}), 400
+                return jsonify({'msg': msg}), 200
+
+            items = payload.get('data') or []
+            if not items:
+                return jsonify({'msg': 'No creators selected'}), 400
+
+            reset = 0
+            for item in items:
+                creator_id = (item or {}).get('item') or (item or {}).get('target')
+                if not creator_id:
+                    continue
+                success, creator, _ = Utils.get_creators(multiple=False, creator=creator_id)
+                if not success:
+                    Utils.write_log(creator)
+                    continue
+                if not creator:
+                    continue
+                success, msg = Creator().update(creator, {'message_offset': 0})
+                if success:
+                    reset += 1
+                else:
+                    Utils.write_log(msg)
+
+            if reset < 1:
+                return jsonify({'msg': 'Could not reset any creator offsets'}), 400
+            label = 'creator' if reset == 1 else 'creators'
+            return jsonify({'msg': f'Reset offset for {reset} {label}'}), 200
         else:return jsonify({'msg':'No action specified'}),400
     except Exception as error:
         Utils.write_log(error)
@@ -283,23 +325,24 @@ def handle_creators(action):
 def creator():
     try:
         if request.method == 'GET':
-            category = request.args.get('catgeory', 'creators')
+            category = request.args.get('category') or request.args.get('catgeory', 'creators')
             g.page = category
-            creator = request.args.get('creator') if category == 'creators' else request.args.get('user')
+            creator = request.args.get('creator') or request.args.get('user')
             success, creator, _ = Utils.get_creators(multiple=False,creator=creator)
             if not success:raise Exception(creator)
             elif len(creator) < 1:return render_template('view-item.html',action=404)
             
             creator_id = creator['id']
             creator = creator['data']
-            reuse_ip = creator['reuse_ip']
+            reuse_ip = creator.get('reuse_ip', True)
 
             return render_template(
                 'creator.html',
                 creator_id = creator_id,
                 post_id = creator.get('post_id'),
-                creator=creator['details']['user'],
-                reuse_ip=reuse_ip)
+                creator=creator.get('details', {}).get('user', {}),
+                reuse_ip=reuse_ip,
+                category=category)
         
         elif request.method == 'POST':
             data = request.get_json()
@@ -326,6 +369,14 @@ def creator():
                     return jsonify({'msg':'Error updating user'}), 400
                 else:
                     return jsonify({'msg':'user updated successfully'}),200
+
+            if action == 'reset-offset':
+                success,msg = Creator().update(creator, {'message_offset': 0})
+                if not success:
+                    Utils.write_log(msg)
+                    return jsonify({'msg':'Error resetting offset'}), 400
+                else:
+                    return jsonify({'msg':'Offset reset successfully'}),200
             
             elif action == 'update-media-id':
                 post_id = data['post_id']

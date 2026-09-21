@@ -3,7 +3,10 @@
     <div class="main-container">
         <aside id="aside">
             <div class="title">
-                Console update
+                {%if g.app_logo%}
+                    <img src="{{ g.app_logo }}" alt="" class="app-logo">
+                {%endif%}
+                <span>{{ g.app_name }} console</span>
             </div>
             <div class="content scroll scroll-v scroll-bar">
                 <ul id="console">
@@ -79,7 +82,7 @@
             </div>
         </div>
     </div>
-    <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/settings.js') }}?v=reset-offset-3"></script>
     <script>
         
         const clearConsoleBtn = document.getElementById('clear-console');

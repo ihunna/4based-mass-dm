@@ -1,33 +1,29 @@
-# 4Based.com Creator Management Bot
+# 4based Bulk Messenger
 
-Welcome to the **4Based.com Creator Management Bot**, an innovative tool designed to streamline and enhance the management of content creators on the platform. This bot simplifies the complexities of handling multiple creators by providing a suite of powerful features, all accessible through a user-friendly interface. 
+A dashboard for logging into 4based creator accounts, scraping users, and sending bulk messages.
 
-## Features
+## What it does
 
-- **Role-Based Login**: Secure access for administrators, with distinct roles allocated (Super Admin and Admin) to ensure a tailored and secure management experience.
-- **Creator Management**: Effortlessly add multiple creators, enabling administrators to manage a diverse range of content channels from a single dashboard.
-- **Caption Management**: Assign captions to different creators, allowing for personalized and engaging content delivery.
-- **Image Uploading**: Directly upload images to individual creator accounts, streamlining the content preparation process.
-- **Concurrent Posting**: Simultaneously post content across all added creators, significantly reducing the time and effort required for mass content distribution.
-- **Schedule Creation**: Efficiently create schedules for multiple days, ensuring a consistent and timely content release across all creators.
-- **Paid Content Posting**: Seamlessly post paid pictures, enhancing revenue opportunities for creators while maintaining audience engagement.
-- **Task Management and Reporting**: Update, monitor, and report on task progress, providing clear visibility and control over content delivery.
-- **Task Interruption**: Ability to stop running tasks as necessary, offering flexibility and immediate response to changing requirements.
-- **Visualization Tools**: Comprehensive visualization of all posts, schedules, tasks, admins, and creators, delivering insightful analytics and oversight.
+1. **Login creators** — Add creator accounts (and scraper/user accounts). The bot logs them in, stores session data, and keeps them available from the Creators and Users pages.
+2. **Scrape users** — Run a scraper task to search 4based for client accounts and save them as targets.
+3. **Bulk message users** — Run a messaging task so logged-in creators send DMs to scraped targets they have not already messaged. Messages can be free or paid, with optional media and captions.
 
-## Getting Started
+Supporting pieces:
 
-To begin using the **4Based.com Creator Management Bot**, follow these simple steps:
+- Role-based admin login (super admin / admin)
+- Proxies, captions, and other configs
+- Live console, task list, and the ability to stop a running task
+- Optional proxy flush so a task uses a new IP instead of a stored one
 
-1. **Login**: Access the bot using your designated administrator credentials.
-2. **Add Creators**: Navigate to the 'Creators' section to add new creators to the platform.
-3. **Manage Content**: Utilize the various features such as uploading images, creating schedules, and posting content to manage your creators effectively.
-4. **Monitor Performance**: Check the dashboard for real-time analytics and performance reports.
+## Getting started
+
+1. Log in with an admin account.
+2. Add **creators** and **user** (scraper) accounts.
+3. Put proxies (and captions if needed) under Configs.
+4. Start a **scraper** task from New task to collect targets.
+5. Start a **messaging** task to bulk-message those targets.
+6. Watch progress in the console and on the Tasks page.
 
 ## Support
 
-For assistance email me at`ihunnaemmanuel@gmail.com` or Telegram `https://t.me/hustleoclok`. We're here to help ensure your experience with the **4Based.com Creator Management Bot** is as smooth and beneficial as possible.
-
----
-
-Enjoy streamlined content management and take your creator strategy to the next level with the **4Based.com Creator Management Bot**!
+Email `ihunnaemmanuel@gmail.com` or Telegram [https://t.me/hustleoclok](https://t.me/hustleoclok).

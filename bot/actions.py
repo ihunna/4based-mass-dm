@@ -496,18 +496,20 @@ class Creator:
 		return prefixes
 
 	async def scrape_users(self, scraper, admin, task_id, count=40, offset=0, search=None):
+		stats = {'search': search or '', 'new_users': 0, 'skipped': 0}
 		try:
 			success, task_status = Utils.check_task_status(task_id)
 			if not success:raise Exception(task_status)
 			if task_status['status'].lower() in ['cancelled', 'canceled']:
-				return False, 'Task canceled'
+				return False, 'Task canceled', stats
 
 			if not isinstance(scraper, dict) or not scraper.get('id'):
-				return False, f'Scraper is not logged in: {scraper}'
+				return False, f'Scraper is not logged in: {scraper}', stats
 
 			scraper_id = scraper.get('id')
 			if not search:
 				search = ''.join(random.choices(string.ascii_lowercase, k=2))
+			stats['search'] = search
 			Utils.write_log(f'Scraping users by {scraper_id} search={search} offset={offset}')
 			client_msg = {'msg':f'Scraping users by {scraper_id} ({search})','status':'success','type':'message'}
 			Utils.update_client(client_msg)
@@ -531,17 +533,17 @@ class Creator:
 					timeout=60
 				) as response:
 					if not response.ok:
-						return False, await _http_failure(response, 'Fetch users')
+						return False, await _http_failure(response, 'Fetch users'), stats
 
 					users = await response.json()
 					if not isinstance(users, list) or len(users) < 1:
-						return False, 'No valid users found'
+						return False, 'No valid users found', stats
 
 					candidates = []
 					for user in users:
 						if user.get('creator', False):
 							continue
-						if user.get('cold_communication_status') == 'actively_not_contactable':
+						if user.get('cold_communication_status') in ['actively_not_contactable','passively_not_contactable']:
 							continue
 						user_id = user.get('_id')
 						if not user_id:
@@ -552,32 +554,34 @@ class Creator:
 						})
 
 					if not candidates:
-						return False, 'No valid users found'
+						return False, 'No valid users found', stats
 
 					success, existing_ids = Utils.get_existing_user_ids(
 						[user['_id'] for user in candidates],
 						admin=admin
 					)
 					if not success:
-						return False, existing_ids
+						return False, existing_ids, stats
 
 					new_users = [user for user in candidates if user['_id'] not in existing_ids]
 					skipped = len(candidates) - len(new_users)
+					stats['new_users'] = len(new_users)
+					stats['skipped'] = skipped
 					if skipped:
 						client_msg = {'msg':f'Skipped {skipped} users because they already exist in the database','status':'success','type':'message'}
 						Utils.update_client(client_msg)
 
 					if not new_users:
-						return False, f'No new users found for {scraper_id}'
+						return False, f'No new users found for {scraper_id}', stats
 
 					success, msg = Utils.add_users(new_users, admin=admin, task_id=task_id)
 					if not success:
-						return False, msg
+						return False, msg, stats
 
-					return True, f'Scraped {len(new_users)} users by {scraper_id} ({search})'
+					return True, f'Scraped {len(new_users)} users by {scraper_id} ({search})', stats
 
 		except Exception as e:
-			return False, f'Error scraping users: {str(e)}'
+			return False, f'Error scraping users: {str(e)}', stats
 
 	async def send_messages(self,admin,task_id,creator,config,maxworkers):
 		try:
@@ -585,6 +589,7 @@ class Creator:
 			if not success:raise Exception(task_status)
 			if task_status['status'].lower() in ['cancelled','canceled']:return False,  'Task canceled'
 
+			account = creator
 			creator_data = creator['data']
 			creator_name = creator_data['details']['user']['name']
 			email = creator_data['details']['user']['identifier']
@@ -625,15 +630,22 @@ class Creator:
 			if (not 'headers' in creator.keys() or len(creator.get('headers',{})) < 1) or (not 'cookies' in creator.keys() or len(creator.get('cookies',{})) < 1):
 				return False,f'User {creator_name} does not have session data'
 
-			client_msg = {'msg': f'Fetching users from DB (unmessaged by {creator_name})','status':'success','type':'message'}
+			success, users_msg, total_users = Utils.get_users(admin)
+			if not success:raise Exception(users_msg)
+
+			offset = creator_data.get('message_offset', 0)
+			if offset >= total_users:
+				offset = 0
+
+			client_msg = {'msg': f'Fetching users from DB (unmessaged by {creator_name}) offset {offset}','status':'success','type':'message'}
 			Utils.update_client(client_msg)
-			Utils.write_log(f'--- Fetching users from DB (unmessaged by {creator_name}) ---')
+			Utils.write_log(f'--- Fetching users from DB (unmessaged by {creator_name}) offset {offset} ---')
 
 			async with _http_session(headers=creator.get('headers')) as session:
 				session.cookie_jar.update_cookies(creator.get('cookies'))
 				proxies = self._proxy(creator.get('proxies'), creator.get('reuse_ip', True))
 
-				users, found_users, offset = [], 0, 0
+				users, found_users = [], 0
 				while found_users < maxworkers:
 					success, new_users = Utils.get_unmessaged_users(creator_internal_id, limit=maxworkers, offset=offset)
 					if not success:raise Exception(new_users)
@@ -756,6 +768,9 @@ class Creator:
 						client_msg = {'msg':f'Failed to message user {username}: {e}','status':'error','type':'message'}
 						Utils.update_client(client_msg)
 						continue
+
+			success, msg = Creator().update(account, {'message_offset': offset})
+			if not success:Utils.write_log(msg)
 
 			if success_messages > 0:
 				Utils.write_log(f'=== Successfully sent messages to {success_messages} users by {creator_name} ===')
@@ -1199,7 +1214,7 @@ class _4BASED:
 					continue
 
 				search = prefixes[prefix_i]
-				success, result = await Creator().scrape_users(
+				scrape_ok, result, stats = await Creator().scrape_users(
 					scraper,
 					admin,
 					task_id,
@@ -1208,7 +1223,7 @@ class _4BASED:
 					search=search
 				)
 
-				if not success:
+				if not scrape_ok:
 					client_msg = {'msg': f'Error scraping users on {task_id}: {result}', 'status': 'error', 'type': 'message'}
 					Utils.update_client(client_msg)
 				else:
@@ -1230,8 +1245,17 @@ class _4BASED:
 						raise Cancelled(task_status)
 					await asyncio.sleep(sleep_time)
 
+				new_users = stats.get('new_users', 0)
+				skipped = stats.get('skipped', 0)
 				offset = offset + count
-				if not success or offset >= 400:
+				advance = (
+					not scrape_ok
+					or new_users == 0
+					or len(search) == 1
+					or skipped >= new_users
+					or offset >= 400
+				)
+				if advance:
 					offset = 0
 					prefix_i += 1
 					if prefix_i >= len(prefixes):

@@ -367,7 +367,55 @@ class Utils:
 			success,msg = False, f'Error updating creator: {error}'
 		finally:
 			conn.close() 
-			return success,msg   
+			return success,msg
+
+	@staticmethod
+	def reset_creator_offsets(admin, category='creators'):
+		success, msg, reset = False, '', 0
+		conn = sqlite3.connect(db_file)
+		cursor = conn.cursor()
+		try:
+			category = {'users': 'user', 'creators': 'creator', 'creator': 'creator'}.get(category, 'creator')
+			cursor.execute(
+				"SELECT COUNT(*) FROM creators WHERE admin = ? AND category = ?",
+				(admin, category)
+			)
+			reset = cursor.fetchone()[0] or 0
+			if reset < 1:
+				success, msg = True, 'No creators to reset'
+			else:
+				try:
+					cursor.execute(
+						"""UPDATE creators
+						SET data = json_set(COALESCE(data, '{}'), '$.message_offset', 0)
+						WHERE admin = ? AND category = ? AND json_valid(COALESCE(data, '{}'))""",
+						(admin, category)
+					)
+				except sqlite3.OperationalError:
+					cursor.execute(
+						"SELECT id, email, data FROM creators WHERE admin = ? AND category = ?",
+						(admin, category)
+					)
+					rows = cursor.fetchall()
+					reset = 0
+					for creator_id, email, data in rows:
+						payload = json.loads(data) if data else {}
+						if not isinstance(payload, dict):
+							payload = {}
+						payload['message_offset'] = 0
+						cursor.execute(
+							"UPDATE creators SET data = ? WHERE id = ?",
+							(json.dumps(payload), creator_id)
+						)
+						reset += 1
+				conn.commit()
+				label = 'creator' if reset == 1 else 'creators'
+				success, msg = True, f'Reset offset for {reset} {label}'
+		except Exception as error:
+			success, msg = False, f'Error resetting creator offsets: {error}'
+		finally:
+			conn.close()
+			return success, msg, reset
 		
 	@staticmethod
 	def get_creators(admin='', limit=20, offset=0, multiple=True, creator=None, category='creator', constraint=None, keyword=None, selected_creators=[], exclude_from_posts=None):

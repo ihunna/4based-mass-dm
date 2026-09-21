@@ -11,6 +11,17 @@
                         Add creators
                     </a>
                 </li>
+                {%if total_creators|default(0) > 0%}
+                <li>
+                    <a href="#" data-action="reset offset for"
+                        data-action-url="/creators/reset-offset"
+                        data-action-message="Resetting all creator offsets"
+                        data-action-count="{{total_creators}}"
+                        onclick="event.preventDefault(); handleAction(this,'creators-table','reset-all')">
+                        Reset all offsets
+                    </a>
+                </li>
+                {%endif%}
             </ul>
         </div>
         {%if creators|length > 0%}
@@ -58,6 +69,12 @@
                                             captions
                                         </a>
                                     </li>
+                                    <li data-action="reset offset for" data-action-url="/creators/reset-offset"
+                                    data-action-message="Resetting offset for {{creator.id}}"
+                                    data-item="{{creator.id}}" data-action-target="{{creator.id}}"
+                                    onclick="event.stopPropagation(); handleAction(this,'creators-table','single')" title="Reset offset">
+                                        <i class="fas fa-undo text-primary"></i>
+                                    </li>
                                     <li data-action="delete" data-action-url="/delete-items/creators" 
                                     data-action-message="Deleting creator {{creator.id}}"
                                     data-item="{{creator.id}}" data-action-target="{{creator.id}}"
@@ -70,6 +87,11 @@
                     {%endfor%}
                     <div class="table-row table-bottom">
                         <div class="bottom-actions show">
+                            <div data-action="reset offset for" data-action-url="/creators/reset-offset"
+                                data-action-message="Resetting creator offsets"
+                                class="action bg-primary light" onclick="event.stopPropagation(); handleAction(this,'creators-table','multiple')">
+                                Reset offset
+                            </div>
                             <div data-action="delete" data-action-url="/delete-items/creators" 
                                 data-action-message="Deleting creators" 
                                 class="action delete bg-danger light" onclick="handleAction(this,'creators-table','multiple')">
