@@ -57,7 +57,7 @@ load_dotenv(env_path)
 session_key = os.getenv('SECRET_KEY')
 server_key = os.getenv('SERVER_KEY')
 host = os.getenv('HOST')
-app_prefix = os.getenv('APP_PREFIX') or ''
+app_prefix = (os.getenv('APP_PREFIX') or '').rstrip('/')
 app_name = os.getenv('APP_NAME') or '4based'
 app_logo = os.getenv('APP_LOGO') or 'img/logo.png'
 
@@ -84,6 +84,10 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024
 app.config["SESSION_TYPE"] = "filesystem"
 app.config["SECRET_KEY"] = session_key.encode()
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
+app.config["SESSION_COOKIE_NAME"] = os.getenv('SESSION_COOKIE_NAME') or '4based_session'
+if app_prefix:
+    app.config["APPLICATION_ROOT"] = app_prefix
+    app.config["SESSION_COOKIE_PATH"] = app_prefix
 Session(app)
 
 @app.template_filter('date')
