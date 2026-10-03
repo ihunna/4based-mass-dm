@@ -3,7 +3,7 @@
 from app_configs import creators_file,configs_folder,universal_files
 from utils import Utils
 from configs import *
-import io, asyncio, traceback
+import io, asyncio, traceback, threading
 from urllib.parse import urlparse
 from curl_cffi.requests import AsyncSession
 from curl_cffi.requests.exceptions import RequestException
@@ -340,6 +340,31 @@ class Cancelled(Exception):
 	pass
 
 
+class SessionExpired(Exception):
+	"""4based rejected the creator's session token (HTTP 401)."""
+
+
+_session_locks = {}
+_session_locks_guard = threading.Lock()
+
+
+def _session_lock(key):
+	# Tasks run in separate threads with their own event loops, so an asyncio.Lock can't be shared.
+	with _session_locks_guard:
+		return _session_locks.setdefault(key, threading.Lock())
+
+
+def _auth_token(headers):
+	return (headers or {}).get('x-auth-token') or (headers or {}).get('X-Auth-Token')
+
+
+def _parse_utc(value):
+	try:
+		return datetime.strptime(str(value)[:19], '%Y-%m-%d %H:%M:%S')
+	except (TypeError, ValueError):
+		return None
+
+
 async def _response_json(response):
 	text = await response.text()
 	if text.lstrip().startswith('<') or 'Just a moment' in text or 'cf-mitigated' in response.headers:
@@ -532,6 +557,8 @@ class Creator:
 					proxy=proxies,
 					timeout=60
 				) as response:
+					if response.status == 401:
+						raise SessionExpired(await _http_failure(response, 'Fetch users'))
 					if not response.ok:
 						return False, await _http_failure(response, 'Fetch users'), stats
 
@@ -541,13 +568,9 @@ class Creator:
 
 					candidates = []
 					for user in users:
-						if user.get('creator', False):
-							continue
-						if user.get('cold_communication_status') in ['actively_not_contactable','passively_not_contactable']:
+						if not self._is_messageable(user):
 							continue
 						user_id = user.get('_id')
-						if not user_id:
-							continue
 						candidates.append({
 							'_id': user_id,
 							'username': user.get('name') or user.get('username') or 'unknown',
@@ -580,8 +603,169 @@ class Creator:
 
 					return True, f'Scraped {len(new_users)} users by {scraper_id} ({search})', stats
 
+		except SessionExpired:
+			raise
 		except Exception as e:
 			return False, f'Error scraping users: {str(e)}', stats
+
+	def _is_messageable(self, user):
+		if not user.get('_id') or user.get('creator', False):
+			return False
+		if user.get('cold_communication_status') in ['actively_not_contactable','passively_not_contactable']:
+			return False
+		return True
+
+	async def _prepare_sender(self, admin, task_id, creator, config):
+		creator_data = creator['data']
+		user = creator_data['details']['user']
+		creator_name = user['name']
+		caption_source = config.get('caption_source','creator')
+		Utils.write_log(f'=== {config} ===')
+
+		success, session_data = await self.login(
+			admin,
+			user['identifier'],
+			user['password'],
+			reuse_ip=self._reuse_ip(creator, config),
+			task_id=task_id,
+			proxy_flush=config.get('proxy_flush', False)
+		)
+		if not success:raise Exception(session_data)
+
+		captions = []
+		if caption_source == 'creator':
+			captions_file = os.path.join(configs_folder,creator['id'],'captions.txt')
+			if not isfile(captions_file):raise Exception(f'Captions file does not exist for {creator_name}')
+
+			with open(captions_file,'r',encoding='utf-8') as f:
+				captions = [line.strip() for line in f.readlines() if line.strip()]
+				if len(captions) < 1: raise ValueError('Captions can not be empty')
+		elif caption_source == 'pool':
+			captions = [line for line in config.get('caption_pool') or [] if line]
+			if len(captions) < 1: raise ValueError('Follow-up caption pool can not be empty')
+
+		if len(session_data.get('headers') or {}) < 1 or len(session_data.get('cookies') or {}) < 1:
+			raise Exception(f'User {creator_name} does not have session data')
+
+		return {
+			'session_data': session_data,
+			'creator_name': creator_name,
+			'creator_id': user['_id'],
+			'creator_internal_id': creator['id'],
+			'captions': captions,
+			'caption_source': caption_source,
+			'universal_caption': config.get('caption',''),
+			'price': config.get('price',0),
+			'has_media': config.get('has_media',False),
+			'media_args': {
+				'has_media': config.get('has_media',False),
+				'vault_media_id': creator_data.get('media_id',None),
+				'is_paid': config.get('cost_type','free') != 'free',
+				'price': config.get('price',0),
+			},
+		}
+
+	def _pick_caption(self, sender):
+		if sender['caption_source'] in ('creator', 'pool'):
+			return random.choice(sender['captions'])
+		return sender['universal_caption']
+
+	async def _refresh_sender(self, admin, task_id, account, config, sender, session):
+		user = account['data']['details']['user']
+		success, session_data = await self.login(
+			admin,
+			user['identifier'],
+			user['password'],
+			reuse_ip=self._reuse_ip(account, config),
+			task_id=task_id,
+			proxy_flush=config.get('proxy_flush', False),
+			stale_token=_auth_token(sender['session_data'].get('headers'))
+		)
+		if not success:
+			return False, session_data
+		sender['session_data'] = session_data
+		session.headers.update(session_data.get('headers') or {})
+		session.cookie_jar.update_cookies(session_data.get('cookies') or {})
+		return True, session_data
+
+	async def get_chat_state(self, session, creator_id, chat_id, recipient_id, proxies):
+		async with session.get(
+			f'https://rest.4based.com/api/1.0/user/{creator_id}/chat/{chat_id}',
+			params={'with_last_message': 'true', 'with_users': 'true'},
+			proxy=proxies,
+			timeout=60
+		) as response:
+			if response.status == 401:
+				raise SessionExpired(await _http_failure(response, f'Fetch chat {chat_id}'))
+			if not response.ok:
+				return False, await _http_failure(response, f'Fetch chat {chat_id}')
+			chat = await response.json()
+
+		recipient = next((user for user in chat.get('users') or [] if user.get('_id') == recipient_id), {})
+		return True, {
+			'last_message': chat.get('last_message') or {},
+			'recipient_online': bool(recipient.get('is_online')),
+		}
+
+	def _resend_decision(self, last_message, stored_chat, creator_id, hours):
+		# Only messages sent to the user count; user replies and 4based auto_* messages fall back to our DB record.
+		last_type = str(last_message.get('type') or '')
+		from_creator = last_message.get('user_id') == creator_id and not last_type.startswith('auto_')
+		if from_creator:
+			stored_id = stored_chat.get('last_message_id')
+			if stored_id and last_message.get('_id') != stored_id:
+				return True, 'last sent message was manual'
+			reference = last_message.get('created_at')
+		else:
+			reference = stored_chat.get('created_at')
+
+		sent_at = _parse_utc(reference)
+		if sent_at is None:
+			return True, 'no previous sent message found'
+		age_hours = (datetime.utcnow() - sent_at).total_seconds() / 3600
+		if age_hours < hours:
+			return False, f'last sent {age_hours:.1f}h ago < {hours}h'
+		return True, f'last sent {age_hours:.1f}h ago'
+
+	async def _send_chat_message(self, session, creator_id, chat_id, caption, username, creator_name, proxies, has_media=False, vault_media_id=None, is_paid=False, price=0):
+		sent_media_id = None
+		if has_media and vault_media_id:
+			success, sent_media_id = await self.upload_media(
+				session,
+				creator_id,
+				vault_media_id,
+				creator_name,
+				username,
+				caption,
+				is_paid=is_paid,
+				price=price,
+				proxy=proxies
+			)
+			if not success:
+				return False, f'Failed to upload media for {username} by {creator_name}: {sent_media_id}'
+
+		json_data = {
+			'message': caption,
+			'sender_status': 'sent',
+			'local_id': str(uuid.uuid4()),
+		}
+		if sent_media_id:json_data['file_stack_id'] = sent_media_id
+
+		async with session.post(
+			f'https://rest.4based.com/api/1.0/user/{creator_id}/chat/{chat_id}/message',
+			json=json_data,
+			proxy=proxies,
+			timeout=60
+		) as response:
+			if response.status == 401:
+				raise SessionExpired(await _http_failure(response, f'Send message to {username} by {creator_name}'))
+			if not response.ok:
+				return False, await _http_failure(response, f'Send message to {username} by {creator_name}')
+			try:
+				sent = await response.json()
+			except Exception:
+				sent = {}
+		return True, (sent or {}).get('_id')
 
 	async def send_messages(self,admin,task_id,creator,config,maxworkers):
 		try:
@@ -590,50 +774,17 @@ class Creator:
 			if task_status['status'].lower() in ['cancelled','canceled']:return False,  'Task canceled'
 
 			account = creator
-			creator_data = creator['data']
-			creator_name = creator_data['details']['user']['name']
-			email = creator_data['details']['user']['identifier']
-			password = creator_data['details']['user']['password']
-			creator_id = creator_data['details']['user']['_id']
-			creator_internal_id = creator['id']
-
-			caption = config.get('caption','')
-			caption_source = config.get('caption_source','creator')
-			has_media = config.get('has_media',False)
-			vault_media_id = creator_data.get('media_id',None)
-			Utils.write_log(f'=== {config} ===')
-
-			is_paid = False if config.get('cost_type','free') == 'free' else True
-			price = config.get('price',0)
-
-			success,_creator = await self.login(
-				admin,
-				email,
-				password,
-				reuse_ip=self._reuse_ip(creator, config),
-				task_id=task_id,
-				proxy_flush=config.get('proxy_flush', False)
-			)
-			if not success:raise Exception(_creator)
-
-			creator = _creator
-
-			if caption_source == 'creator':
-				captions_file = os.path.join(configs_folder,creator_internal_id,'captions.txt')
-				if not isfile(captions_file):raise Exception(f'Captions file does not exist for {creator_name}')
-
-				with open(captions_file,'r',encoding='utf-8') as f:
-					captions = [line.strip() for line in f.readlines()]
-					if len(captions) < 1: raise ValueError('Captions can not be empty')
-					caption = random.choice(captions)
-
-			if (not 'headers' in creator.keys() or len(creator.get('headers',{})) < 1) or (not 'cookies' in creator.keys() or len(creator.get('cookies',{})) < 1):
-				return False,f'User {creator_name} does not have session data'
+			sender = await self._prepare_sender(admin, task_id, creator, config)
+			creator = sender['session_data']
+			creator_name = sender['creator_name']
+			creator_id = sender['creator_id']
+			creator_internal_id = sender['creator_internal_id']
+			has_media, price, media_args = sender['has_media'], sender['price'], sender['media_args']
 
 			success, users_msg, total_users = Utils.get_users(admin)
 			if not success:raise Exception(users_msg)
 
-			offset = creator_data.get('message_offset', 0)
+			offset = account['data'].get('message_offset', 0)
 			if offset >= total_users:
 				offset = 0
 
@@ -657,7 +808,7 @@ class Creator:
 				if len(users) == 0:
 					return False, f'No unmessaged users found for {creator_name}'
 
-				success_messages = 0
+				success_messages, conflict_logged, session_refreshed = 0, False, False
 				for user in users:
 					username = user.get('name') or user.get('username') or 'unknown'
 					recipient_id = user.get('_id') or user.get('id')
@@ -670,12 +821,16 @@ class Creator:
 							Utils.write_log(f'--- Skipping user without id: {user} ---')
 							continue
 
+						caption = self._pick_caption(sender)
+
 						# create a chat ID for the user
 						async with session.post(
 							f'https://rest.4based.com/api/1.0/user/{creator_id}/chat/user/{recipient_id}',
 							proxy=proxies,
 							timeout=60
 						) as response:
+							if response.status == 401:
+								raise SessionExpired(await _http_failure(response, f'Create chat with {username} by {creator_name}'))
 							if not response.ok and response.status != 409:
 								err_text = await _http_failure(response, f'Send message to {username} by {creator_name}')
 								client_msg = {'msg':err_text,'status':'error','type':'message'}
@@ -684,7 +839,12 @@ class Creator:
 								continue
 
 							elif response.status == 409:
-								Utils.write_log(f'User {username} already has a chat with {creator_name}, skipping...')
+								if not conflict_logged:
+									body = ' '.join((await response.text() or '').split())[:500]
+									Utils.write_log(f'User {username} already has a chat with {creator_name}, skipping... 409 body: {body}')
+									conflict_logged = True
+								else:
+									Utils.write_log(f'User {username} already has a chat with {creator_name}, skipping...')
 								continue
 
 							chat_data = await response.json()
@@ -695,45 +855,12 @@ class Creator:
 								Utils.write_log(f'--- No chat ID found for user {username} ---')
 								continue
 
-						sent_media_id = None
-						if has_media and vault_media_id:
-							success, sent_media_id = await self.upload_media(
-								session,
-								creator_id,
-								vault_media_id,
-								creator_name,
-								username,
-								caption,
-								is_paid=is_paid,
-								price=price,
-								proxy=proxies
-							)
-							if not success:
-								Utils.write_log(sent_media_id)
-								client_msg = {'msg':f'Failed to upload media for {username} by {creator_name}: {sent_media_id}','status':'error','type':'message'}
-								Utils.update_client(client_msg)
-								continue
-
-						# Send message to the user
-						json_data = {
-							'message': caption,
-							'sender_status': 'sent',
-							'local_id': str(uuid.uuid4()),
-						}
-						if has_media and sent_media_id:json_data['file_stack_id'] = sent_media_id
-
-						async with session.post(
-							f'https://rest.4based.com/api/1.0/user/{creator_id}/chat/{message_id}/message',
-							json=json_data,
-							proxy=proxies,
-							timeout=60
-						) as response:
-							if not response.ok:
-								err_text = await _http_failure(response, f'Send message to {username} by {creator_name}')
-								Utils.write_log(f'--- {err_text} ---')
-								client_msg = {'msg':err_text,'status':'error','type':'message'}
-								Utils.update_client(client_msg)
-								continue
+						success, sent_id = await self._send_chat_message(session, creator_id, message_id, caption, username, creator_name, proxies, **media_args)
+						if not success:
+							Utils.write_log(f'--- {sent_id} ---')
+							client_msg = {'msg':sent_id,'status':'error','type':'message'}
+							Utils.update_client(client_msg)
+							continue
 
 						success, msg = Utils.add_message(
 							message_id,
@@ -744,9 +871,10 @@ class Creator:
 							username,
 							has_media,
 							f'https://4based.com/chat/{message_id}/conversation',
-							json_data['sender_status'],
+							'sent',
 							caption,
-							price
+							price,
+							last_message_id=sent_id
 						)
 
 						if not success:
@@ -762,6 +890,16 @@ class Creator:
 
 						success_messages += 1
 						await asyncio.sleep(random.randint(5, 10))  # Sleep to avoid rate limiting
+
+					except SessionExpired as e:
+						if session_refreshed:
+							return False, f'Session for {creator_name} was rejected again after relogin: {e}'
+						Utils.write_log(f'--- Session for {creator_name} expired, refreshing: {e} ---')
+						success, msg = await self._refresh_sender(admin, task_id, account, config, sender, session)
+						if not success:
+							return False, f'Could not refresh session for {creator_name}: {msg}'
+						session_refreshed = True
+						continue
 
 					except Exception as e:
 						Utils.write_log(str(e))
@@ -786,23 +924,138 @@ class Creator:
 		except Exception as e:
 			return False,f'Error sending messages to users for {creator.get("id")}: {str(e)}'
 
-	async def login(self,admin,email,password,reuse_ip=True,task_id=None,category='creators',proxy_flush=False):
-		attempts = 3
-		last_error = None
-		for attempt in range(1, attempts + 1):
-			success, result = await self._try_login(
-				admin, email, password, reuse_ip=reuse_ip, task_id=task_id, category=category, proxy_flush=proxy_flush
-			)
-			if success:
-				return success, result
-			last_error = result
-			if not _is_retryable_error(result) or attempt == attempts:
-				return False, result
-			Utils.write_log(f'Retrying login for {email} ({attempt}/{attempts}): {result}')
-			await asyncio.sleep(min(2 * attempt, 5))
-		return False, last_error
+	async def send_follow_ups(self,admin,task_id,creator,config,maxworkers):
+		try:
+			success,task_status = Utils.check_task_status(task_id)
+			if not success:raise Exception(task_status)
+			if task_status['status'].lower() in ['cancelled','canceled']:return False,  'Task canceled'
 
-	async def _try_login(self,admin,email,password,reuse_ip=True,task_id=None,category='creators',proxy_flush=False):
+			sender = await self._prepare_sender(admin, task_id, creator, config)
+			session_data = sender['session_data']
+			creator_name = sender['creator_name']
+			creator_id = sender['creator_id']
+			creator_internal_id = sender['creator_internal_id']
+			online_only = config.get('online_only', True)
+			hours = int(config.get('resend_after_hours') or 24)
+
+			success, candidates = Utils.get_resend_candidates(creator_internal_id, hours, limit=maxworkers * 5)
+			if not success:raise Exception(candidates)
+			if not candidates:
+				return True, f'No chats older than {hours}h to follow up for {creator_name}'
+
+			client_msg = {'msg': f'Checking {len(candidates)} chats for follow-ups by {creator_name}','status':'success','type':'message'}
+			Utils.update_client(client_msg)
+			Utils.write_log(f'--- Checking {len(candidates)} chats for follow-ups by {creator_name} ---')
+
+			sent_follow_ups, failed_follow_ups, session_refreshed = 0, 0, False
+			async with _http_session(headers=session_data.get('headers')) as session:
+				session.cookie_jar.update_cookies(session_data.get('cookies'))
+				proxies = self._proxy(session_data.get('proxies'), session_data.get('reuse_ip', True))
+
+				for user in candidates:
+					if sent_follow_ups >= maxworkers:
+						break
+					username = user.get('username') or 'unknown'
+					recipient_id = user.get('id')
+					try:
+						success,task_status = Utils.check_task_status(task_id)
+						if not success:raise Exception(task_status)
+						if task_status['status'].lower() in ['cancelled','canceled']:
+							return False, 'Task canceled'
+
+						success, stored_chat = Utils.get_chat_for_recipient(creator_internal_id, recipient_id)
+						if not success:raise Exception(stored_chat)
+						if not stored_chat:
+							continue
+
+						chat_id = stored_chat['chat_id']
+						success, chat_state = await self.get_chat_state(session, creator_id, chat_id, recipient_id, proxies)
+						if not success:
+							Utils.write_log(f'--- Skipping {username}; chat fetch failed: {chat_state} ---')
+							client_msg = {'msg':chat_state,'status':'error','type':'message'}
+							Utils.update_client(client_msg)
+							failed_follow_ups += 1
+							continue
+
+						if online_only and not chat_state['recipient_online']:
+							Utils.write_log(f'--- Skipping {username}; not online ---')
+							continue
+
+						should_send, reason = self._resend_decision(chat_state['last_message'], stored_chat, creator_id, hours)
+						if not should_send:
+							Utils.write_log(f'--- Skipping {username}; {reason} ---')
+							continue
+
+						caption = self._pick_caption(sender)
+						success, sent_id = await self._send_chat_message(session, creator_id, chat_id, caption, username, creator_name, proxies, **sender['media_args'])
+						if not success:
+							Utils.write_log(f'--- {sent_id} ---')
+							client_msg = {'msg':sent_id,'status':'error','type':'message'}
+							Utils.update_client(client_msg)
+							failed_follow_ups += 1
+							continue
+
+						success, msg = Utils.update_last_sent(chat_id, sent_id, caption)
+						if not success:Utils.write_log(msg)
+
+						Utils.write_log(f'=== Followed up {username} by {creator_name} ({reason}) ===')
+						client_msg = {'msg':f'Followed up {username} by {creator_name} ({reason})','status':'success','type':'message'}
+						Utils.update_client(client_msg)
+						sent_follow_ups += 1
+						await asyncio.sleep(random.randint(5, 10))  # Sleep to avoid rate limiting
+
+					except SessionExpired as e:
+						if session_refreshed:
+							return False, f'Session for {creator_name} was rejected again after relogin: {e}'
+						Utils.write_log(f'--- Session for {creator_name} expired, refreshing: {e} ---')
+						success, msg = await self._refresh_sender(admin, task_id, creator, config, sender, session)
+						if not success:
+							return False, f'Could not refresh session for {creator_name}: {msg}'
+						session_refreshed = True
+						continue
+
+					except Exception as e:
+						Utils.write_log(str(e))
+						client_msg = {'msg':f'Failed to follow up user {username}: {e}','status':'error','type':'message'}
+						Utils.update_client(client_msg)
+						failed_follow_ups += 1
+						continue
+
+			if sent_follow_ups > 0:
+				return True, f'Sent {sent_follow_ups} follow-ups by {creator_name}'
+			if failed_follow_ups > 0:
+				return False, f'{creator_name} could not send any follow-ups ({failed_follow_ups} failed)'
+			return True, f'{creator_name} had no chats ready for a follow-up'
+
+		except ValueError as ve:
+			return False, f'Value error while sending follow-ups for {creator.get("id")}: {str(ve)}'
+
+		except Exception as e:
+			return False, f'Error sending follow-ups for {creator.get("id")}: {str(e)}'
+
+	async def login(self,admin,email,password,reuse_ip=True,task_id=None,category='creators',proxy_flush=False,stale_token=None):
+		lock = _session_lock(f'{admin}:{email}')
+		while not lock.acquire(blocking=False):
+			await asyncio.sleep(0.5)
+		try:
+			attempts = 3
+			last_error = None
+			for attempt in range(1, attempts + 1):
+				success, result = await self._try_login(
+					admin, email, password, reuse_ip=reuse_ip, task_id=task_id, category=category, proxy_flush=proxy_flush, stale_token=stale_token
+				)
+				if success:
+					return success, result
+				last_error = result
+				if not _is_retryable_error(result) or attempt == attempts:
+					return False, result
+				Utils.write_log(f'Retrying login for {email} ({attempt}/{attempts}): {result}')
+				await asyncio.sleep(min(2 * attempt, 5))
+			return False, last_error
+		finally:
+			lock.release()
+
+	async def _try_login(self,admin,email,password,reuse_ip=True,task_id=None,category='creators',proxy_flush=False,stale_token=None):
 		async with _http_session() as session:
 			try:
 				if task_id:
@@ -821,8 +1074,15 @@ class Creator:
 				use_stored = reuse_ip and not proxy_flush
 				proxies = self._proxy(user_data.get('proxies') if use_stored else None, use_stored)
 
+				stored_token = _auth_token(user_data.get('headers'))
+				if stale_token and stored_token and stored_token != stale_token:
+					Utils.write_log(f'Session for {email} was already refreshed by another task, reusing it')
+					user_data['id'] = creator_id
+					user_data['status'] = 'Online'
+					return True, user_data
+
 				# reuse an existing session if it is still valid
-				if not proxy_flush and not new_user and user_data.get('headers') and user_data.get('cookies'):
+				if not stale_token and not new_user and user_data.get('headers') and user_data.get('cookies'):
 					session.headers.update(user_data.get('headers', {}))
 					session.cookie_jar.update_cookies(user_data.get('cookies', {}))
 					params = {
@@ -838,6 +1098,9 @@ class Creator:
 						if response.status == 200:
 							user_data['id'] = creator_id
 							user_data['status'] = 'Online'
+							if proxy_flush:
+								user_data['proxies'] = proxies
+								user_data['reuse_ip'] = False
 							return True, user_data
 
 				json_data = {
@@ -1023,7 +1286,7 @@ class _4BASED:
 			Utils.push_task_update(task, task_status, task_msg)
 
 
-	async def start_messaging(self,task,maxworkers=10):
+	async def start_messaging(self,task,maxworkers=10,follow_up=False):
 		task_status,task_msg = 'failed',f'Started messaging for {task["id"]}'
 		try:
 			admin = task['admin']
@@ -1061,7 +1324,8 @@ class _4BASED:
 				client_msg = {'msg':f'Proxy flush enabled: reuse_ip disabled for {flushed} accounts with stored proxies','status':'success','type':'message'}
 				Utils.update_client(client_msg)
 
-			Utils.write_log(f'=== Messaging started for {task_id} ===')
+			Utils.write_log(f'=== {"Follow-ups" if follow_up else "Messaging"} started for {task_id} ===')
+			send_method = 'send_follow_ups' if follow_up else 'send_messages'
 
 			while True:
 				success,task_status = Utils.check_task_status(task_id)
@@ -1070,7 +1334,7 @@ class _4BASED:
 					break
 
 				results = await asyncio.gather(
-					*[Creator().send_messages(admin, task_id, creator, config, maxworkers) for creator in creators],
+					*[getattr(Creator(), send_method)(admin, task_id, creator, config, maxworkers) for creator in creators],
 					return_exceptions=True
 				)
 
@@ -1083,15 +1347,17 @@ class _4BASED:
 						success,result = False, str(item)
 
 					if not success:
-						client_msg = {'msg':f'Error messaging users on {task_id}: {result}','status':'error','type':'message'}
+						label = 'Error sending follow-ups' if follow_up else 'Error messaging users'
+						client_msg = {'msg':f'{label} on {task_id}: {result}','status':'error','type':'message'}
 						success,msg = Utils.update_client(client_msg)
 					else:
-						client_msg = {'msg':f'Success messaging users on {task_id}: {result}','status':'success','type':'message'}
+						label = 'Follow-ups' if follow_up else 'Success messaging users'
+						client_msg = {'msg':f'{label} on {task_id}: {result}','status':'success','type':'message'}
 						success,msg = Utils.update_client(client_msg)
 
 					Utils.write_log(f'=== {result} ===')
 
-				wait_message = f'Waiting for {time_message[str(time_between)]} before sending another batch of messages'
+				wait_message = f'Waiting for {time_message[str(time_between)]} before sending another batch of {"follow-ups" if follow_up else "messages"}'
 				Utils.write_log(wait_message)
 				client_msg = {'msg':wait_message,'status':'success','type':'message'}
 				success,msg = Utils.update_client(client_msg)
@@ -1140,6 +1406,29 @@ class _4BASED:
 				Utils.write_log(f'Task | {task_id} was stopped')
 			else:
 				Utils.write_log(f'Task | {task_id} finished operation')
+
+	async def _scrape_with_refresh(self, admin, task_id, config, target_scraper, scraper, count, offset, search):
+		try:
+			return await Creator().scrape_users(scraper, admin, task_id, count=count, offset=offset, search=search)
+		except SessionExpired as error:
+			email = target_scraper['email']
+			Utils.write_log(f'--- Session for {email} expired, refreshing: {error} ---')
+			success, scraper = await Creator().login(
+				admin,
+				email,
+				target_scraper['data']['details']['user']['password'],
+				reuse_ip=Creator()._reuse_ip(target_scraper, config),
+				task_id=task_id,
+				category='users',
+				proxy_flush=config.get('proxy_flush', False),
+				stale_token=_auth_token(scraper.get('headers'))
+			)
+			if not success:
+				return False, f'Could not refresh session for {email}: {scraper}', {'search': search, 'new_users': 0, 'skipped': 0}
+			try:
+				return await Creator().scrape_users(scraper, admin, task_id, count=count, offset=offset, search=search)
+			except SessionExpired as error:
+				return False, f'Session for {email} was rejected again after relogin: {error}', {'search': search, 'new_users': 0, 'skipped': 0}
 
 	async def start_scraping(self, task):
 		task_status, task_msg = 'failed', f'Started scraping for {task["id"]}'
@@ -1214,13 +1503,8 @@ class _4BASED:
 					continue
 
 				search = prefixes[prefix_i]
-				scrape_ok, result, stats = await Creator().scrape_users(
-					scraper,
-					admin,
-					task_id,
-					count=count,
-					offset=offset,
-					search=search
+				scrape_ok, result, stats = await self._scrape_with_refresh(
+					admin, task_id, config, target_scraper, scraper, count, offset, search
 				)
 
 				if not scrape_ok:

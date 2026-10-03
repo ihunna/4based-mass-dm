@@ -410,7 +410,7 @@ def messages():
 
         admin = session['USER']['id']
 
-        if action == 'start-messaging':
+        if action in ['start-messaging', 'start-follow-up']:
             success, creators, total_creators = Utils.get_creators(admin=admin)
             
             if not success:raise Exception(creators)
@@ -550,6 +550,78 @@ def handle_messages():
             Utils.write_log(f'Task successfully created')
             return jsonify({'msg': f'Task successfully started'}), 200
             
+        else:return jsonify({'msg': f'Could not start task {task_id}'}), 400
+
+    except Exception as error:
+        Utils.write_log(error)
+        abort(500)
+
+@app.route('/start-follow-up', methods=['POST'])
+@login_required
+def handle_follow_ups():
+    try:
+        admin = session['USER']['id']
+
+        if len(Utils.load_proxies()) < 1:return jsonify({'msg': f'Proxies must not be empty'}), 400
+
+        success, tasks,_ = Utils.get_tasks(admin=admin, constraint='type', keyword='follow-ups')
+        if not success:raise Exception(tasks)
+        running_task = tasks[0] if len(tasks) > 0 else {'status':None}
+
+        if running_task['status'] in ['running','pending']:
+            success,msg = Utils.update_client({'msg':f'Please wait for the current follow-up task to finish or stop it before creating another','status':'error','type':'message'})
+            if not success:Utils.write_log(msg)
+            return jsonify({'msg': 'A follow-up task is already running. Please wait until it finishes.'}), 400
+
+        data = request.get_json()
+        follow_up_data = {
+            'price': data.get('message-price'),
+            'caption': str(data.get('message-caption', '')).replace('\n', ''),
+            'caption_source': data.get('message-caption-source'),
+            'caption_pool': [line.strip() for line in str(data.get('follow-up-pool', '')).splitlines() if line.strip()],
+            'creators_source': data.get('creators-source'),
+            'cost_type': data.get('message-cost-type', 'free'),
+            'selected_creators': data.get('select-creators', []),
+            'has_media': True if data.get('use-media', 'false').lower() == 'yes' else False,
+            'admin': admin,
+            'time_between': int(data.get('time-between-actions', '3600')),
+            'proxy_flush': True if str(data.get('proxy-flush', 'no')).lower() == 'yes' else False,
+            'online_only': str(data.get('online-only', 'yes')).lower() == 'yes',
+            'resend_after_hours': max(1, int(data.get('resend-after-hours') or 24))
+        }
+        if follow_up_data['caption_source'] == 'pool' and not follow_up_data['caption_pool']:
+            return jsonify({'msg': 'Add at least one follow-up caption to the pool'}), 400
+
+        task_id = str(uuid.uuid4()).upper()[:8]
+        task_data = {
+            'id': task_id,
+            'admin': admin,
+            'status': 'pending',
+            'action_count': data.get('action-count', 1),
+            'type': 'follow-ups',
+            'message': f'Creating task on {admin}',
+            'config': follow_up_data
+        }
+        success, msg = Utils.add_task(task_id, task_data)
+        if not success:raise Exception(msg)
+
+        def run_start_follow_ups():
+            run_async_coroutine(_4BASED().start_messaging(task_data, int(data.get('max-workers', 10)), follow_up=True))
+
+        task = socketio.start_background_task(run_start_follow_ups)
+
+        if task.is_alive():
+            success,msg = Utils.update_task(task_id,{
+                'status':'running',
+                'message':'Started sending follow-ups'
+            })
+            if not success:Utils.write_log(msg)
+
+            success,msg = Utils.update_client({'msg':f'{task_id} successfully created','status':'success','type':'message'})
+            if not success:Utils.write_log(msg)
+            Utils.write_log(f'Follow-up task successfully created')
+            return jsonify({'msg': f'Task successfully started'}), 200
+
         else:return jsonify({'msg': f'Could not start task {task_id}'}), 400
 
     except Exception as error:

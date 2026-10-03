@@ -34,7 +34,7 @@
                             <i class="fas fa-chart-pie"></i> Overview
                         </a>
                     </li>
-                    <li class="{%if g.page in ['start-messaging','start-scraping','scraper']%} active {%endif%}">
+                    <li class="{%if g.page in ['start-messaging','start-follow-up','start-scraping','scraper']%} active {%endif%}">
                         <a href="{{ url_for('messages', action='start-messaging') }}">
                             <i class="fas fa-plus"></i> New task
                         </a>
@@ -256,11 +256,12 @@
         
         </script>
 
-    {%elif g.page in ['start-messaging','edit-admin','scraper']%}
+    {%elif g.page in ['start-messaging','start-follow-up','edit-admin','scraper']%}
         <script>
             const page = '{{g.page}}'
             const pageConfigs = {
                 'start-messaging':'#messages-form',
+                'start-follow-up':'#follow-up-form',
                 'edit-admin':'#admins-form',
                 'scraper':'#scraper-form'
             }
@@ -282,7 +283,7 @@
                     jsonData[key] = value;
                 }
 
-                if (['start-messaging'].includes(page)) {
+                if (['start-messaging','start-follow-up'].includes(page)) {
                     const messages = form.querySelectorAll('.message-holder');
                     jsonData.total_actions = messages.length;
                     const select = form.querySelector('select[name="select-creators"]');

@@ -173,6 +173,11 @@ class Utils:
 					price REAL DEFAULT 0,
 					created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 				)''')
+
+			try:
+				cursor.execute('ALTER TABLE messages ADD COLUMN last_message_id TEXT')
+			except sqlite3.OperationalError as error:
+				if 'duplicate column' not in str(error).lower():raise
 			
 			cursor.execute('''
 				CREATE TABLE IF NOT EXISTS users (
@@ -729,15 +734,15 @@ class Utils:
 		
 	
 	@staticmethod
-	def add_message(message_id, admin, creator_id, creator_name, recipient_id, recipient_name, has_media, link, sender_status, caption, price):
+	def add_message(message_id, admin, creator_id, creator_name, recipient_id, recipient_name, has_media, link, sender_status, caption, price, last_message_id=None):
 		success, msg = False, ''
 		conn = sqlite3.connect(db_file)
 		cursor = conn.cursor()
 		try:
 			cursor.execute("""INSERT INTO messages \
-				(id, admin, creator_id, creator_name, recipient_id, recipient_name, has_media, link, sender_status, caption, price) \
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-				(message_id, admin, creator_id, creator_name, recipient_id, recipient_name, has_media, link, sender_status, caption, price))
+				(id, admin, creator_id, creator_name, recipient_id, recipient_name, has_media, link, sender_status, caption, price, last_message_id) \
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+				(message_id, admin, creator_id, creator_name, recipient_id, recipient_name, has_media, link, sender_status, caption, price, last_message_id))
 			conn.commit()
 			success, msg = True, 'Message added successfully'
 		except Exception as error:
@@ -1056,6 +1061,64 @@ class Utils:
 			return True, users
 		except Exception as e:
 			return False, str(e)
+
+	@staticmethod
+	def get_resend_candidates(creator_id, hours, limit=50):
+		try:
+			conn = sqlite3.connect(db_file)
+			cursor = conn.cursor()
+			cursor.execute("""
+				SELECT recipient_id, recipient_name
+				FROM messages
+				WHERE creator_id = ?
+				GROUP BY recipient_id
+				HAVING MAX(created_at) <= datetime('now', ?)
+				ORDER BY RANDOM()
+				LIMIT ?
+			""", (creator_id, f'-{int(hours)} hours', limit))
+			rows = cursor.fetchall()
+			conn.close()
+			return True, [{'id': row[0], 'username': row[1]} for row in rows]
+		except Exception as e:
+			return False, str(e)
+
+	@staticmethod
+	def get_chat_for_recipient(creator_id, recipient_id):
+		try:
+			conn = sqlite3.connect(db_file)
+			cursor = conn.cursor()
+			cursor.execute("""
+				SELECT id, last_message_id, created_at
+				FROM messages
+				WHERE creator_id = ? AND recipient_id = ?
+				ORDER BY created_at DESC
+				LIMIT 1
+			""", (creator_id, recipient_id))
+			row = cursor.fetchone()
+			conn.close()
+			if row is None:
+				return True, None
+			return True, {'chat_id': row[0], 'last_message_id': row[1], 'created_at': row[2]}
+		except Exception as e:
+			return False, str(e)
+
+	@staticmethod
+	def update_last_sent(chat_id, last_message_id, caption):
+		success, msg = False, ''
+		conn = sqlite3.connect(db_file)
+		cursor = conn.cursor()
+		try:
+			cursor.execute(
+				'UPDATE messages SET last_message_id = ?, caption = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?',
+				(last_message_id, caption, chat_id)
+			)
+			conn.commit()
+			success, msg = True, 'Message updated successfully'
+		except Exception as error:
+			success, msg = False, f'Error updating last sent message: {error}'
+		finally:
+			conn.close()
+			return success, msg
 
 	@staticmethod
 	def add_users(users, admin=None, task_id=None):
