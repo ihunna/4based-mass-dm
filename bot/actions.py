@@ -82,6 +82,21 @@ def _format_network_error(error, method=None, url=None, proxy=None, timeout=None
 	return reason
 
 
+_DROP_RETRIES = 2
+# the request never reached the server, so any method is safe to resend
+_NOT_SENT_CODES = ('curl: (5)', 'curl: (7)', 'curl: (35)', 'curl: (60)', 'curl: (97)')
+# the connection died mid-request; resend reads plus POST and PATCH
+_DROPPED_CODES = ('curl: (16)', 'curl: (52)', 'curl: (55)', 'curl: (56)', 'curl: (92)')
+_DROPPED_METHODS = ('GET', 'HEAD', 'POST', 'PATCH')
+
+
+def _is_dropped_connection(error, method):
+	raw = str(error)
+	if any(code in raw for code in _NOT_SENT_CODES):
+		return True
+	return method.upper() in _DROPPED_METHODS and any(code in raw for code in _DROPPED_CODES)
+
+
 async def _http_failure(response, action):
 	body = (await response.text() or '').strip()
 	snippet = ' '.join(body.split())[:240] or 'empty body'
@@ -273,10 +288,10 @@ class _HttpSession:
 			return proxy.get('http') or proxy.get('https')
 		return proxy
 
-	async def _ensure_client(self, proxy=None):
+	async def _ensure_client(self, proxy=None, reconnect=False):
 		proxy = self._normalize_proxy(proxy)
 		async with self._lock:
-			if self._client is not None and (proxy is None or proxy == self._proxy):
+			if not reconnect and self._client is not None and (proxy is None or proxy == self._proxy):
 				return
 			cookies = self.cookie_jar.snapshot()
 			if self._client is not None:
@@ -298,23 +313,23 @@ class _HttpSession:
 		timeout = kwargs.pop('timeout', DEFAULT_TIMEOUT)
 		await self._ensure_client(proxy)
 		used_proxy = proxy or self._proxy
-		try:
-			response = await self._client.request(
-				method,
-				url,
-				headers=dict(self.headers),
-				timeout=timeout,
-				**kwargs,
-			)
-		except RequestException as error:
-			raise NetworkError(_format_network_error(
-				error, method, url, used_proxy, timeout
-			)) from error
-		except OSError as error:
-			raise NetworkError(_format_network_error(
-				error, method, url, used_proxy, timeout
-			)) from error
-		return _HttpResponse(response)
+		for attempt in range(1, _DROP_RETRIES + 2):
+			try:
+				response = await self._client.request(
+					method,
+					url,
+					headers=dict(self.headers),
+					timeout=timeout,
+					**kwargs,
+				)
+				return _HttpResponse(response)
+			except (RequestException, OSError) as error:
+				if attempt > _DROP_RETRIES or not _is_dropped_connection(error, method):
+					raise NetworkError(_format_network_error(
+						error, method, url, used_proxy, timeout
+					)) from error
+				await asyncio.sleep(attempt)
+				await self._ensure_client(proxy, reconnect=True)
 
 	def get(self, url, **kwargs):
 		return _RequestContext(self, 'GET', url, kwargs)
