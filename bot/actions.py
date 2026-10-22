@@ -535,7 +535,14 @@ class Creator:
 				current = nxt
 		return prefixes
 
-	async def scrape_users(self, scraper, admin, task_id, count=40, offset=0, search=None):
+	async def scrape_users(self, scraper, admin, task_id, count=40, offset=0, search=None, recipient_type='users'):
+		if recipient_type not in ('users', 'creators', 'both'):
+			recipient_type = 'users'
+		roles = []
+		if recipient_type in ('users', 'both'):
+			roles.append(('client', 'scraped'))
+		if recipient_type in ('creators', 'both'):
+			roles.append(('creator', 'creator'))
 		stats = {'search': search or '', 'new_users': 0, 'skipped': 0}
 		try:
 			success, task_status = Utils.check_task_status(task_id)
@@ -558,73 +565,92 @@ class Creator:
 				session.cookie_jar.update_cookies(scraper.get('cookies'))
 				proxies = self._proxy(scraper.get('proxies'), scraper.get('reuse_ip', True))
 
-				params = {
-					'offset': f'{offset}',
-					'limit': f'{count}',
-					'search': search,
-					'sort': '{"follower_count":"asc"}',
-					'role': 'client',
-				}
+				all_candidates = []
+				seen_ids = set()
+				for role, category in roles:
+					params = {
+						'offset': f'{offset}',
+						'limit': f'{count}',
+						'search': search,
+						'sort': '{"follower_count":"asc"}',
+						'role': role,
+					}
 
-				async with session.get(
-					'https://rest.4based.com/api/1.0/user',
-					params=params,
-					proxy=proxies,
-					timeout=60
-				) as response:
-					if response.status == 401:
-						raise SessionExpired(await _http_failure(response, 'Fetch users'))
-					if not response.ok:
-						return False, await _http_failure(response, 'Fetch users'), stats
+					async with session.get(
+						'https://rest.4based.com/api/1.0/user',
+						params=params,
+						proxy=proxies,
+						timeout=60
+					) as response:
+						if response.status == 401:
+							raise SessionExpired(await _http_failure(response, 'Fetch users'))
+						if not response.ok:
+							return False, await _http_failure(response, 'Fetch users'), stats
 
-					users = await response.json()
-					if not isinstance(users, list) or len(users) < 1:
-						return False, 'No valid users found', stats
-
-					candidates = []
-					for user in users:
-						if not self._is_messageable(user):
+						users = await response.json()
+						if not isinstance(users, list):
 							continue
-						user_id = user.get('_id')
-						candidates.append({
-							'_id': user_id,
-							'username': user.get('name') or user.get('username') or 'unknown',
-						})
 
-					if not candidates:
-						return False, 'No valid users found', stats
+						for user in users:
+							if not self._is_messageable(user, is_creator=(category == 'creator')):
+								continue
+							user_id = user.get('_id')
+							if user_id in seen_ids:
+								continue
+							seen_ids.add(user_id)
+							all_candidates.append(({
+								'_id': user_id,
+								'username': user.get('name') or user.get('username') or 'unknown',
+							}, category))
 
-					success, existing_ids = Utils.get_existing_user_ids(
-						[user['_id'] for user in candidates],
-						admin=admin
-					)
-					if not success:
-						return False, existing_ids, stats
+				if not all_candidates:
+					return False, 'No valid users found', stats
 
-					new_users = [user for user in candidates if user['_id'] not in existing_ids]
-					skipped = len(candidates) - len(new_users)
-					stats['new_users'] = len(new_users)
-					stats['skipped'] = skipped
-					if skipped:
-						client_msg = {'msg':f'Skipped {skipped} users because they already exist in the database','status':'success','type':'message'}
-						Utils.update_client(client_msg)
+				success, existing_ids = Utils.get_existing_user_ids(
+					[user['_id'] for user, _category in all_candidates],
+					admin=admin
+				)
+				if not success:
+					return False, existing_ids, stats
 
-					if not new_users:
-						return False, f'No new users found for {scraper_id}', stats
+				new_by_category = {'scraped': [], 'creator': []}
+				for candidate, category in all_candidates:
+					if candidate['_id'] not in existing_ids:
+						new_by_category[category].append(candidate)
+				new_users = new_by_category['scraped'] + new_by_category['creator']
+				skipped = len(all_candidates) - len(new_users)
+				stats['new_users'] = len(new_users)
+				stats['skipped'] = skipped
+				if skipped:
+					client_msg = {'msg':f'Skipped {skipped} users because they already exist in the database','status':'success','type':'message'}
+					Utils.update_client(client_msg)
 
-					success, msg = Utils.add_users(new_users, admin=admin, task_id=task_id)
+				if not new_users:
+					return False, f'No new users found for {scraper_id}', stats
+
+				for category, group in new_by_category.items():
+					if not group:
+						continue
+					success, msg = Utils.add_users(group, admin=admin, task_id=task_id, category=category)
 					if not success:
 						return False, msg, stats
 
-					return True, f'Scraped {len(new_users)} users by {scraper_id} ({search})', stats
+				scraped_parts = []
+				if new_by_category['scraped']:
+					scraped_parts.append(f"{len(new_by_category['scraped'])} users")
+				if new_by_category['creator']:
+					scraped_parts.append(f"{len(new_by_category['creator'])} creators")
+				return True, f'Scraped {" and ".join(scraped_parts)} by {scraper_id} ({search})', stats
 
 		except SessionExpired:
 			raise
 		except Exception as e:
 			return False, f'Error scraping users: {str(e)}', stats
 
-	def _is_messageable(self, user):
-		if not user.get('_id') or user.get('creator', False):
+	def _is_messageable(self, user, is_creator=False):
+		if not user.get('_id'):
+			return False
+		if not is_creator and user.get('creator', False):
 			return False
 		if user.get('cold_communication_status') in ['actively_not_contactable','passively_not_contactable']:
 			return False
@@ -796,16 +822,21 @@ class Creator:
 			creator_internal_id = sender['creator_internal_id']
 			has_media, price, media_args = sender['has_media'], sender['price'], sender['media_args']
 
-			success, users_msg, total_users = Utils.get_users(admin)
+			recipient_type = config.get('recipient_type', 'users')
+			if recipient_type not in ('users', 'creators', 'both'):
+				recipient_type = 'users'
+			recipient_label = {'users': 'users', 'creators': 'creators', 'both': 'users and creators'}[recipient_type]
+
+			success, users_msg, total_users = Utils.get_users(admin, recipient_type=recipient_type)
 			if not success:raise Exception(users_msg)
 
 			offset = account['data'].get('message_offset', 0)
 			if offset >= total_users:
 				offset = 0
 
-			client_msg = {'msg': f'Fetching users from DB (unmessaged by {creator_name}) offset {offset}','status':'success','type':'message'}
+			client_msg = {'msg': f'Fetching {recipient_label} from DB (unmessaged by {creator_name}) offset {offset}','status':'success','type':'message'}
 			Utils.update_client(client_msg)
-			Utils.write_log(f'--- Fetching users from DB (unmessaged by {creator_name}) offset {offset} ---')
+			Utils.write_log(f'--- Fetching {recipient_label} from DB (unmessaged by {creator_name}) offset {offset} ---')
 
 			async with _http_session(headers=creator.get('headers')) as session:
 				session.cookie_jar.update_cookies(creator.get('cookies'))
@@ -813,7 +844,7 @@ class Creator:
 
 				users, found_users = [], 0
 				while found_users < maxworkers:
-					success, new_users = Utils.get_unmessaged_users(creator_internal_id, limit=maxworkers, offset=offset)
+					success, new_users = Utils.get_unmessaged_users(creator_internal_id, limit=maxworkers, offset=offset, recipient_type=recipient_type)
 					if not success:raise Exception(new_users)
 					if not new_users:break
 					users.extend(new_users)
@@ -821,7 +852,7 @@ class Creator:
 					offset += maxworkers
 
 				if len(users) == 0:
-					return False, f'No unmessaged users found for {creator_name}'
+					return False, f'No unmessaged {recipient_label} found for {creator_name}'
 
 				success_messages, conflict_logged, session_refreshed = 0, False, False
 				for user in users:
@@ -834,6 +865,9 @@ class Creator:
 							return False, 'Task canceled'
 						if not recipient_id:
 							Utils.write_log(f'--- Skipping user without id: {user} ---')
+							continue
+						if recipient_id == creator_id:
+							Utils.write_log(f'--- Skipping {username}; creator cannot message themselves ---')
 							continue
 
 						caption = self._pick_caption(sender)
@@ -927,11 +961,11 @@ class Creator:
 
 			if success_messages > 0:
 				Utils.write_log(f'=== Successfully sent messages to {success_messages} users by {creator_name} ===')
-				client_msg = {'msg':f'Successfully sent messages to {success_messages} users by {creator_name}','status':'success','type':'message'}
+				client_msg = {'msg':f'Successfully sent messages to {success_messages} {recipient_label} by {creator_name}','status':'success','type':'message'}
 				success,msg = Utils.update_client(client_msg)
 				if not success:Utils.write_log(msg)
-				return True, f'Successfully sent messages to {success_messages} users by {creator_name}'
-			return False, f'{creator_name} could not send any messages to users'
+				return True, f'Successfully sent messages to {success_messages} {recipient_label} by {creator_name}'
+			return False, f'{creator_name} could not send any messages to {recipient_label}'
 
 		except ValueError as ve:
 			return False, f'Value error while sending messages to users for {creator.get("id")}: {str(ve)}'
@@ -953,7 +987,10 @@ class Creator:
 			online_only = config.get('online_only', True)
 			hours = int(config.get('resend_after_hours') or 24)
 
-			success, candidates = Utils.get_resend_candidates(creator_internal_id, hours, limit=maxworkers * 5)
+			recipient_type = config.get('recipient_type', 'users')
+			if recipient_type not in ('users', 'creators', 'both'):
+				recipient_type = 'users'
+			success, candidates = Utils.get_resend_candidates(creator_internal_id, hours, limit=maxworkers * 5, recipient_type=recipient_type)
 			if not success:raise Exception(candidates)
 			if not candidates:
 				return True, f'No chats older than {hours}h to follow up for {creator_name}'
@@ -1424,7 +1461,7 @@ class _4BASED:
 
 	async def _scrape_with_refresh(self, admin, task_id, config, target_scraper, scraper, count, offset, search):
 		try:
-			return await Creator().scrape_users(scraper, admin, task_id, count=count, offset=offset, search=search)
+			return await Creator().scrape_users(scraper, admin, task_id, count=count, offset=offset, search=search, recipient_type=config.get('recipient_type', 'users'))
 		except SessionExpired as error:
 			email = target_scraper['email']
 			Utils.write_log(f'--- Session for {email} expired, refreshing: {error} ---')
@@ -1441,7 +1478,7 @@ class _4BASED:
 			if not success:
 				return False, f'Could not refresh session for {email}: {scraper}', {'search': search, 'new_users': 0, 'skipped': 0}
 			try:
-				return await Creator().scrape_users(scraper, admin, task_id, count=count, offset=offset, search=search)
+				return await Creator().scrape_users(scraper, admin, task_id, count=count, offset=offset, search=search, recipient_type=config.get('recipient_type', 'users'))
 			except SessionExpired as error:
 				return False, f'Session for {email} was rejected again after relogin: {error}', {'search': search, 'new_users': 0, 'skipped': 0}
 

@@ -506,7 +506,11 @@ def handle_messages():
             return jsonify({'msg': 'A messaging task is already running. Please wait until it finishes.'}), 400
 
         data = request.get_json()
+        recipient_type = str(data.get('recipient-type', 'users') or 'users').lower()
+        if recipient_type not in ('users', 'creators', 'both'):
+            return jsonify({'msg': 'Invalid recipient type'}), 400
         message_data = {
+            'recipient_type': recipient_type,
             'price': data.get('message-price'),
             'caption': str(data.get('message-caption', '')).replace('\n', ''),
             'caption_source': data.get('message-caption-source'),
@@ -577,7 +581,11 @@ def handle_follow_ups():
             return jsonify({'msg': 'A follow-up task is already running. Please wait until it finishes.'}), 400
 
         data = request.get_json()
+        recipient_type = str(data.get('recipient-type', 'users') or 'users').lower()
+        if recipient_type not in ('users', 'creators', 'both'):
+            return jsonify({'msg': 'Invalid recipient type'}), 400
         follow_up_data = {
+            'recipient_type': recipient_type,
             'price': data.get('message-price'),
             'caption': str(data.get('message-caption', '')).replace('\n', ''),
             'caption_source': data.get('message-caption-source'),
@@ -658,7 +666,11 @@ def scraper():
             return jsonify({'msg': 'A scraper task is already running. Please wait until it finishes.'}), 400
 
         data = request.get_json()
+        recipient_type = str(data.get('recipient-type', 'users') or 'users').lower()
+        if recipient_type not in ('users', 'creators', 'both'):
+            return jsonify({'msg': 'Invalid recipient type'}), 400
         scraper_data = {
+            'recipient_type': recipient_type,
             'admin': admin,
             'time_between': int(data.get('time-between-actions', '3600')),
             'max_actions': int(data.get('max-actions', 10)),
