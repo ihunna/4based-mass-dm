@@ -287,11 +287,15 @@
                     const messages = form.querySelectorAll('.message-holder');
                     jsonData.total_actions = messages.length;
                     const select = form.querySelector('select[name="select-creators"]');
-                    const selectedCreators = Array.from(select.selectedOptions)
+                    const selectedCreators = select ? Array.from(select.selectedOptions)
                     .map(option => option.value)
-                    .filter(value => value !== '');
+                    .filter(value => value !== '') : [];
                     // Add to your payload:
                     jsonData['select-creators'] = selectedCreators;
+                    const userSelect = form.querySelector('select[name="select-users"]');
+                    jsonData['select-users'] = userSelect ? Array.from(userSelect.selectedOptions)
+                    .map(option => option.value)
+                    .filter(value => value !== '') : [];
                 }
 
                 const response = await fetch(`${url}`, {

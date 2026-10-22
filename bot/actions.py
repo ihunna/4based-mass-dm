@@ -689,6 +689,7 @@ class Creator:
 			user['password'],
 			reuse_ip=self._reuse_ip(creator, config),
 			task_id=task_id,
+			category='users' if config.get('sender_type') == 'users' else 'creators',
 			proxy_flush=config.get('proxy_flush', False)
 		)
 		if not success:raise Exception(session_data)
@@ -739,6 +740,7 @@ class Creator:
 			user['password'],
 			reuse_ip=self._reuse_ip(account, config),
 			task_id=task_id,
+			category='users' if config.get('sender_type') == 'users' else 'creators',
 			proxy_flush=config.get('proxy_flush', False),
 			stale_token=_auth_token(sender['session_data'].get('headers'))
 		)
@@ -828,7 +830,7 @@ class Creator:
 				sent = {}
 		return True, (sent or {}).get('_id')
 
-	async def send_messages(self,admin,task_id,creator,config,maxworkers):
+	async def send_messages(self,admin,task_id,creator,config,maxworkers,shard_index=None,shard_count=None):
 		try:
 			success,task_status = Utils.check_task_status(task_id)
 			if not success:raise Exception(task_status)
@@ -864,7 +866,7 @@ class Creator:
 
 				users, found_users = [], 0
 				while found_users < maxworkers:
-					success, new_users = Utils.get_unmessaged_users(creator_internal_id, limit=maxworkers, offset=offset, recipient_type=recipient_type)
+					success, new_users = Utils.get_unmessaged_users(creator_internal_id, limit=maxworkers, offset=offset, recipient_type=recipient_type, shard_index=shard_index, shard_count=shard_count)
 					if not success:raise Exception(new_users)
 					if not new_users:break
 					users.extend(new_users)
@@ -1381,14 +1383,27 @@ class _4BASED:
 				'86400':'24 hours'
 			}
 
-			success,creators,total_creators = Utils.get_creators(admin=admin,limit=100,selected_creators=selected_creators)
+			# Sender is chosen independently of recipients: send as creator
+			# accounts (default, legacy tasks) or as user accounts. The
+			# selected/universal source was already resolved into
+			# selected_senders by the route; old tasks only have
+			# selected_creators, which now holds that same selection.
+			sender_type = config.get('sender_type', 'creators')
+			if sender_type not in ('creators', 'users'):
+				sender_type = 'creators'
+			sender_category = 'users' if sender_type == 'users' else 'creators'
+			selected_senders = config.get('selected_senders') or selected_creators
+
+			success,creators,total_creators = Utils.get_creators(admin=admin,limit=100,selected_creators=selected_senders,category=sender_category)
 			if not success:raise Exception(creators)
 
 			while len(creators) < total_creators:
-				success,page,total_creators = Utils.get_creators(admin=admin,limit=100,offset=len(creators),selected_creators=selected_creators)
+				success,page,total_creators = Utils.get_creators(admin=admin,limit=100,offset=len(creators),selected_creators=selected_senders,category=sender_category)
 				if not success:raise Exception(page)
 				if not page: break
 				creators += page
+			if not creators:
+				raise Exception(f'No {sender_type[:-1]} accounts available to send from on {task_id}; add one first')
 
 			if config.get('proxy_flush'):
 				flushed = Creator().apply_proxy_flush(creators)
@@ -1398,6 +1413,10 @@ class _4BASED:
 
 			Utils.write_log(f'=== {"Follow-ups" if follow_up else "Messaging"} started for {task_id} ===')
 			send_method = 'send_follow_ups' if follow_up else 'send_messages'
+			# Sharding only applies to first messages: each sender gets a
+			# disjoint slice of the target pool. Follow-ups are per-sender
+			# chats, so they are never sharded.
+			shard = bool(config.get('shard_targets')) and not follow_up and len(creators) > 1
 
 			while True:
 				success,task_status = Utils.check_task_status(task_id)
@@ -1405,10 +1424,18 @@ class _4BASED:
 				if task_status['status'].lower() in ['cancelled','canceled']:
 					break
 
-				results = await asyncio.gather(
-					*[getattr(Creator(), send_method)(admin, task_id, creator, config, maxworkers) for creator in creators],
-					return_exceptions=True
-				)
+				if follow_up:
+					calls = [Creator().send_follow_ups(admin, task_id, creator, config, maxworkers) for creator in creators]
+				else:
+					calls = [
+						Creator().send_messages(
+							admin, task_id, creator, config, maxworkers,
+							shard_index=index if shard else None,
+							shard_count=len(creators) if shard else None
+						)
+						for index, creator in enumerate(creators)
+					]
+				results = await asyncio.gather(*calls, return_exceptions=True)
 
 				for item in results:
 					if isinstance(item, Exception):

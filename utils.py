@@ -1050,7 +1050,7 @@ class Utils:
 			return success, existing
 
 	@staticmethod
-	def get_unmessaged_users(creator_id, limit=50, offset=0, recipient_type='users'):
+	def get_unmessaged_users(creator_id, limit=50, offset=0, recipient_type='users', shard_index=None, shard_count=None):
 		try:
 			conn = sqlite3.connect(db_file)
 			cursor = conn.cursor()
@@ -1060,11 +1060,22 @@ class Utils:
 				category_sql = ''
 			else:
 				category_sql = "AND COALESCE(u.category, 'scraped') != 'creator'"
+			# Optional sharding: split targets between senders by the
+			# target's stable rowid, so sender i only ever picks targets
+			# where rowid % shard_count == i. rowid never changes for a
+			# row, so a target stays in the same shard across iterations
+			# (as long as the number of senders doesn't change).
+			shard_sql, params = '', []
+			if shard_count and int(shard_count) > 1 and shard_index is not None:
+				shard_sql = "AND (u.rowid % ? = ?)"
+				params += [int(shard_count), int(shard_index)]
+			params += [creator_id, limit, offset]
 			cursor.execute(f"""
 				SELECT u.id, u.username
 				FROM users u
 				WHERE u.status = 'active'
 				{category_sql}
+				{shard_sql}
 				AND u.id NOT IN (
 					SELECT m.recipient_id
 					FROM messages m
@@ -1072,7 +1083,7 @@ class Utils:
 				)
 				ORDER BY u.created_at DESC
 				LIMIT ? OFFSET ?
-			""", (creator_id, limit, offset))
+			""", tuple(params))
 			rows = cursor.fetchall()
 			conn.close()
 			users = [{'id': row[0], 'username': row[1]} for row in rows]

@@ -93,25 +93,78 @@
                     <div class="u-settings input-container">
                         <div class="input-container flex radio">
                             <span style="padding: 0; margin: 0 auto 0 0;">
-                                Choose creators source
+                                Send as
                             </span>
                             <div class="radio-box">
-                                <input type="radio" class="creators" id="select-creators" name="creators-source" value="select-creators">
-                                <label for="select-creators">Use selected creators</label>
+                                <input type="radio" class="sender-type" id="sender-type-creators" name="sender-type" value="creators" checked>
+                                <label for="sender-type-creators">Creator</label>
                             </div>
                             <div class="radio-box">
-                                <input type="radio" class="creators" id="universal-creators" name="creators-source" value="universal" checked>
-                                <label for="universal-creators">Use universal creators</label>
+                                <input type="radio" class="sender-type" id="sender-type-users" name="sender-type" value="users">
+                                <label for="sender-type-users">User</label>
                             </div>
                         </div>
-                        <div class="input-container" style="display: none;">
-                            <select name="select-creators" id="select-creators" multiple>
-                                <option value="">Choose creators</option>
-                                {% for creator in creators%}
-                                    <option value="{{creator.id}}">{{creator.data.details.user.identifier}}</option>
-                                {%endfor%}
-                            </select>
+                        <div class="sender-source sender-source-creators">
+                            <div class="input-container flex radio">
+                                <span style="padding: 0; margin: 0 auto 0 0;">
+                                    Choose creators source
+                                </span>
+                                <div class="radio-box">
+                                    <input type="radio" class="creators" id="select-creators" name="creators-source" value="select-creators">
+                                    <label for="select-creators">Use selected creators</label>
+                                </div>
+                                <div class="radio-box">
+                                    <input type="radio" class="creators" id="universal-creators" name="creators-source" value="universal" checked>
+                                    <label for="universal-creators">Use universal creators</label>
+                                </div>
+                            </div>
+                            <div class="input-container" style="display: none;">
+                                <select name="select-creators" id="select-creators" multiple>
+                                    <option value="">Choose creators</option>
+                                    {% for creator in creators%}
+                                        <option value="{{creator.id}}">{{creator.data.details.user.identifier}}</option>
+                                    {%endfor%}
+                                </select>
+                            </div>
                         </div>
+                        <div class="sender-source sender-source-users" style="display: none;">
+                            <div class="input-container flex radio">
+                                <span style="padding: 0; margin: 0 auto 0 0;">
+                                    Choose users source
+                                </span>
+                                <div class="radio-box">
+                                    <input type="radio" class="users" id="select-users-radio" name="users-source" value="select-users">
+                                    <label for="select-users-radio">Use selected users</label>
+                                </div>
+                                <div class="radio-box">
+                                    <input type="radio" class="users" id="universal-users" name="users-source" value="universal" checked>
+                                    <label for="universal-users">Use universal users</label>
+                                </div>
+                            </div>
+                            <div class="input-container" style="display: none;">
+                                <select name="select-users" id="select-users-list" multiple>
+                                    <option value="">Choose users</option>
+                                    {% for account in user_accounts%}
+                                        <option value="{{account.id}}">{{account.data.details.user.identifier}}</option>
+                                    {%endfor%}
+                                </select>
+                            </div>
+                        </div>
+                        {%if not follow_up%}
+                        <div class="input-container flex radio">
+                            <span style="padding: 0; margin: 0 auto 0 0;">
+                                Split targets between senders
+                            </span>
+                            <div class="radio-box">
+                                <input type="radio" class="shard-targets" id="shard-targets-yes" name="shard-targets" value="yes">
+                                <label for="shard-targets-yes">Yes</label>
+                            </div>
+                            <div class="radio-box">
+                                <input type="radio" class="shard-targets" id="shard-targets-no" name="shard-targets" value="no" checked>
+                                <label for="shard-targets-no">No</label>
+                            </div>
+                        </div>
+                        {%endif%}
                         <div class="input-container flex radio">
                             <span style="padding: 0; margin: 0 auto 0 0;">
                                 Choose recipients
@@ -207,7 +260,7 @@
                             </span>
                             <div class="radio-box">
                                 <input type="radio" class="captions" id="message-caption-creator" name="message-caption-source" value="creator">
-                                <label for="message-caption-creator">Use creator's caption</label>
+                                <label for="message-caption-creator">Use sender's caption</label>
                             </div>
                             <div class="radio-box">
                                 <input type="radio" class="captions" id="message-caption-universal" name="message-caption-source" value="universal" checked>
@@ -259,36 +312,33 @@
                 // Only a single message is allowed, so no counter or add/remove logic
                 const messageHolder = document.querySelector('.message-holder');
                 updateRadioButtons(messageHolder);
-                // Add event listeners for creators radio buttons outside updateRadioButtons
-                const creatorsRadios = document.querySelectorAll('input.creators[type="radio"]');
-                creatorsRadios.forEach(radio => {
-                    radio.addEventListener('change', function () {
-                        const creatorsSelect = document.querySelector('[name="select-creators"]');
-                        const creatorsSelectHolder = creatorsSelect.parentNode;
-                        if (this.value === 'select-creators') {
-                            creatorsSelect.setAttribute('required','required');
-                            creatorsSelectHolder.style.display = '';
+                // Sender type toggles which source block (creators / users) is visible.
+                // Only the active block's select is required / submitted with values.
+                const taskForm = document.querySelector('.add-message form');
+                function syncSenderSource() {
+                    if (!taskForm) return;
+                    const checkedSender = taskForm.querySelector('input.sender-type[type="radio"]:checked');
+                    const senderType = checkedSender ? checkedSender.value : 'creators';
+                    taskForm.querySelectorAll('.sender-source').forEach(block => {
+                        const isActive = block.classList.contains(`sender-source-${senderType}`);
+                        block.style.display = isActive ? '' : 'none';
+                        const select = block.querySelector('select');
+                        if (!select) return;
+                        const sourceChecked = block.querySelector('input[type="radio"]:checked');
+                        const showSelect = isActive && sourceChecked && sourceChecked.value.startsWith('select-');
+                        select.parentNode.style.display = showSelect ? '' : 'none';
+                        if (showSelect) {
+                            select.setAttribute('required', 'required');
                         } else {
-                            creatorsSelect.value = '';
-                            creatorsSelect.removeAttribute('required');
-                            creatorsSelectHolder.style.display = 'none';
+                            select.removeAttribute('required');
+                            if (!isActive) select.value = '';
                         }
                     });
-                });
-                // Set initial state on page load
-                const checkedCreatorsRadio = document.querySelector('input.creators[type="radio"]:checked');
-                if (checkedCreatorsRadio) {
-                    const creatorsSelect = document.querySelector('[name="select-creators"]');
-                    const creatorsSelectHolder = creatorsSelect.parentNode;
-                    if (checkedCreatorsRadio.value === 'select-creators') {
-                        creatorsSelect.setAttribute('required','required');
-                        creatorsSelectHolder.style.display = '';
-                    } else {
-                        creatorsSelect.value = '';
-                        creatorsSelect.removeAttribute('required');
-                        creatorsSelectHolder.style.display = 'none';
-                    }
                 }
+                document.querySelectorAll('input.sender-type[type="radio"], input.creators[type="radio"], input.users[type="radio"]').forEach(radio => {
+                    radio.addEventListener('change', syncSenderSource);
+                });
+                syncSenderSource();
                 // Media radio toggle logic
                 // const useMediaRadios = document.querySelectorAll('input.use-media[type="radio"]');
                 // const mediaIdContainer = document.getElementById('media-id-container');

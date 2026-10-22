@@ -19,6 +19,43 @@ def run_async_coroutine(coroutine):
             return loop.run_until_complete(coroutine)
         raise
 
+def _sender_config(data):
+    """Resolve who sends a message/follow-up task.
+
+    Sender is independent of the recipient type: a task can message
+    creators *as* a creator account or *as* a user (scraper) account.
+    Returns (config, error) where config carries the effective source and
+    selection under both the new sender_* keys and the legacy
+    creators_source/selected_creators keys.
+    """
+    sender_type = str(data.get('sender-type', 'creators') or 'creators').lower()
+    if sender_type not in ('creators', 'users'):
+        return None, 'Invalid sender type'
+    if sender_type == 'creators':
+        source = str(data.get('creators-source', 'universal') or 'universal')
+        selected = data.get('select-creators', []) or []
+        select_value = 'select-creators'
+    else:
+        source = str(data.get('users-source', 'universal') or 'universal')
+        selected = data.get('select-users', []) or []
+        select_value = 'select-users'
+    if source not in (select_value, 'universal'):
+        source = 'universal'
+    if not isinstance(selected, (list, tuple)):
+        selected = [selected]
+    selected = [str(item) for item in selected if str(item).strip()]
+    if source == select_value and not selected:
+        label = 'creator' if sender_type == 'creators' else 'user'
+        return None, f'Select at least one {label} account to send from'
+    config = {
+        'sender_type': sender_type,
+        'sender_source': source,
+        'selected_senders': selected,
+        'creators_source': source,
+        'selected_creators': selected,
+    }
+    return config, None
+
 @socketio.on('connect')
 def handle_connect():
     socketio.emit('connection','connection successful')
@@ -412,13 +449,16 @@ def messages():
 
         if action in ['start-messaging', 'start-follow-up']:
             success, creators, total_creators = Utils.get_creators(admin=admin)
-            
+
             if not success:raise Exception(creators)
+
+            success, user_accounts, total_user_accounts = Utils.get_creators(admin=admin, category='users')
+            if not success:raise Exception(user_accounts)
 
             with open(universal_files['captions'],'r',encoding='utf-8') as f:
                 captions = [caption for caption in f.readlines() if caption != '\n']
 
-            return render_template('messages.html',action=action,captions=captions,creators=creators)
+            return render_template('messages.html',action=action,captions=captions,creators=creators,user_accounts=user_accounts)
         
         elif action == 'get-items':
             item = request.args.get('item')
@@ -509,20 +549,23 @@ def handle_messages():
         recipient_type = str(data.get('recipient-type', 'users') or 'users').lower()
         if recipient_type not in ('users', 'creators', 'both'):
             return jsonify({'msg': 'Invalid recipient type'}), 400
+        sender_config, sender_error = _sender_config(data)
+        if sender_error:
+            return jsonify({'msg': sender_error}), 400
         message_data = {
             'recipient_type': recipient_type,
+            **sender_config,
             'price': data.get('message-price'),
             'caption': str(data.get('message-caption', '')).replace('\n', ''),
             'caption_source': data.get('message-caption-source'),
             'caption_pool': [line.strip() for line in str(data.get('follow-up-pool', '')).splitlines() if line.strip()],
-            'creators_source': data.get('creators-source'),
             'cost_type': data.get('message-cost-type', 'free'),
-            'selected_creators': data.get('select-creators', []),
             'has_media': True if data.get('use-media', 'false').lower() == 'yes' else False,
             'media_id': data.get('media-id'),
             'admin': admin,
             'time_between': int(data.get('time-between-actions', '3600')),
-            'proxy_flush': True if str(data.get('proxy-flush', 'no')).lower() == 'yes' else False
+            'proxy_flush': True if str(data.get('proxy-flush', 'no')).lower() == 'yes' else False,
+            'shard_targets': str(data.get('shard-targets', 'no')).lower() == 'yes'
         }
         if message_data['caption_source'] == 'pool' and not message_data['caption_pool']:
             return jsonify({'msg': 'Add at least one message to the pool'}), 400
@@ -584,15 +627,17 @@ def handle_follow_ups():
         recipient_type = str(data.get('recipient-type', 'users') or 'users').lower()
         if recipient_type not in ('users', 'creators', 'both'):
             return jsonify({'msg': 'Invalid recipient type'}), 400
+        sender_config, sender_error = _sender_config(data)
+        if sender_error:
+            return jsonify({'msg': sender_error}), 400
         follow_up_data = {
             'recipient_type': recipient_type,
+            **sender_config,
             'price': data.get('message-price'),
             'caption': str(data.get('message-caption', '')).replace('\n', ''),
             'caption_source': data.get('message-caption-source'),
             'caption_pool': [line.strip() for line in str(data.get('follow-up-pool', '')).splitlines() if line.strip()],
-            'creators_source': data.get('creators-source'),
             'cost_type': data.get('message-cost-type', 'free'),
-            'selected_creators': data.get('select-creators', []),
             'has_media': True if data.get('use-media', 'false').lower() == 'yes' else False,
             'admin': admin,
             'time_between': int(data.get('time-between-actions', '3600')),
