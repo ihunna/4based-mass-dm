@@ -673,7 +673,7 @@ def scraper():
             'recipient_type': recipient_type,
             'admin': admin,
             'time_between': int(data.get('time-between-actions', '3600')),
-            'max_actions': int(data.get('max-actions', 10)),
+            'max_actions': int(data.get('max-actions', 40)),
             'proxy_flush': True if str(data.get('proxy-flush', 'no')).lower() == 'yes' else False
         }
 

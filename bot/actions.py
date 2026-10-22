@@ -572,9 +572,11 @@ class Creator:
 						'offset': f'{offset}',
 						'limit': f'{count}',
 						'search': search,
-						'sort': '{"follower_count":"asc"}',
+						'sort': '{"follower_count":"desc"}' if category == 'creator' else '{"follower_count":"asc"}',
 						'role': role,
 					}
+					if category == 'creator':
+						params['verified'] = 'true'
 
 					async with session.get(
 						'https://rest.4based.com/api/1.0/user',
@@ -589,21 +591,35 @@ class Creator:
 
 						users = await response.json()
 						if not isinstance(users, list):
+							Utils.write_log(f'--- Search role={role} search={search} offset={offset} returned non-list {type(users).__name__}: {str(users)[:200]} ---')
 							continue
 
+						dropped = {'no_id': 0, 'creator_flag': 0, 'not_contactable': 0, 'duplicate': 0}
+						kept = 0
 						for user in users:
-							if not self._is_messageable(user, is_creator=(category == 'creator')):
+							if not user.get('_id'):
+								dropped['no_id'] += 1
+								continue
+							if category != 'creator' and user.get('creator', False):
+								dropped['creator_flag'] += 1
+								continue
+							if user.get('cold_communication_status') in ['actively_not_contactable', 'passively_not_contactable']:
+								dropped['not_contactable'] += 1
 								continue
 							user_id = user.get('_id')
 							if user_id in seen_ids:
+								dropped['duplicate'] += 1
 								continue
 							seen_ids.add(user_id)
+							kept += 1
 							all_candidates.append(({
 								'_id': user_id,
 								'username': user.get('name') or user.get('username') or 'unknown',
 							}, category))
+						Utils.write_log(f'--- Search role={role} search={search} offset={offset} verified={params.get("verified", "-")}: {len(users)} returned, {kept} kept, dropped={dropped} ---')
 
 				if not all_candidates:
+					Utils.write_log(f'--- No valid users found for search={search} offset={offset} recipient_type={recipient_type} ---')
 					return False, 'No valid users found', stats
 
 				success, existing_ids = Utils.get_existing_user_ids(
@@ -1523,7 +1539,7 @@ class _4BASED:
 			Utils.write_log(f'=== Scraping started for {task_id} ===')
 
 			offset, i = 0, 0
-			count = config.get('max_actions', 10)
+			count = config.get('max_actions', 40)
 			prefixes = Creator()._search_prefixes()
 			prefix_i = 0
 
