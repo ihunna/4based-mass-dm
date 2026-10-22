@@ -589,7 +589,11 @@ class Creator:
 						if not response.ok:
 							return False, await _http_failure(response, 'Fetch users'), stats
 
-						users = await response.json()
+						try:
+							users = await _response_json(response)
+						except Exception as error:
+							Utils.write_log(f'--- Search role={role} search={search} offset={offset} got non-JSON response: {error} ---')
+							return False, f'{error}', stats
 						if not isinstance(users, list):
 							Utils.write_log(f'--- Search role={role} search={search} offset={offset} returned non-list {type(users).__name__}: {str(users)[:200]} ---')
 							continue
