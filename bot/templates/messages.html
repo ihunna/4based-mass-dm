@@ -3,6 +3,18 @@
  Messages
 {% endblock %}
 {%block main_content%}
+    {% macro task_tabs(current) %}
+        {% set tabs = [
+            ('start-messaging', url_for('messages', action='start-messaging'), 'fa-paper-plane', 'Messanger'),
+            ('start-follow-up', url_for('messages', action='start-follow-up'), 'fa-reply', 'Follow up'),
+            ('start-scraping', url_for('scraper'), 'fa-search', 'Scraper'),
+        ] %}
+        <nav class="alt-tab">
+            {% for key, href, icon, label in tabs %}
+                <a href="{{ href }}" class="{{ 'active' if key == current }}"><i class="fas {{ icon }}"></i>{{ label }}</a>
+            {% endfor %}
+        </nav>
+    {% endmacro %}
     <style>
         .message-holder{
             border: 1px solid var(--success);
@@ -62,14 +74,7 @@
         {% set follow_up = action == 'start-follow-up' %}
         <section class="add-message">
             <div class="holder form-holder">
-                    <div class="alt-tab">
-                        {%if follow_up%}
-                            <a href="{{ url_for('messages', action='start-messaging') }}">Messanger <i class="fas fa-arrow-right"></i></a>
-                        {%else%}
-                            <a href="{{ url_for('messages', action='start-follow-up') }}">Follow up <i class="fas fa-arrow-right"></i></a>
-                        {%endif%}
-                        <a href="{{ url_for('scraper') }}" style="margin-left: 10px;">Scraper <i class="fas fa-arrow-right"></i></a>
-                    </div>
+                    {{ task_tabs(action) }}
                 {%if follow_up%}
                 <form action="" id="follow-up-form" data-action="Create follow-up" 
                     data-action-url="/start-follow-up" data-action-message="Creating follow-up..." 
@@ -191,12 +196,10 @@
                                 <input type="radio" class="captions" id="message-caption-universal" name="message-caption-source" value="universal" checked>
                                 <label for="message-caption-universal">Use universal caption</label>
                             </div>
-                            {%if follow_up%}
                             <div class="radio-box">
                                 <input type="radio" class="captions" id="message-caption-pool" name="message-caption-source" value="pool">
-                                <label for="message-caption-pool">Use follow-up pool</label>
+                                <label for="message-caption-pool">{%if follow_up%}Use follow-up pool{%else%}Use message pool{%endif%}</label>
                             </div>
-                            {%endif%}
                         </div>
                         <div class="input-container">
                             <select name="message-caption" id="message-caption" required>
@@ -206,12 +209,10 @@
                                 {%endfor%}
                             </select>
                         </div>
-                        {%if follow_up%}
                         <div class="input-container" style="display: none;">
                             <textarea class="scroll scroll-v" name="follow-up-pool" id="follow-up-pool" rows="10"></textarea>
-                            <label for="follow-up-pool">Follow-up captions (one per line)</label>
+                            <label for="follow-up-pool">{%if follow_up%}Follow-up captions (one per line){%else%}Messages (one per line){%endif%}</label>
                         </div>
-                        {%endif%}
                         <div class="input-container flex radio">
                             <span style="padding: 0; margin: 0 auto 0 0;">
                                 Use media?
@@ -370,9 +371,7 @@
     {%elif action == 'start-scraping'%}
         <section class="add-scraper">
             <div class="holder form-holder">
-                <div class="alt-tab">
-                    <a href="{{ url_for('messages', action='start-messaging') }}">Messanger <i class="fas fa-arrow-right"></i></a>
-                </div>
+                {{ task_tabs(action) }}
                 <form action="" id="scraper-form" data-action="Scrape accounts"
                     data-action-url="{{ url_for('scraper') }}" data-action-message="Starting scraper..."
                     data-next-action-url="{{ url_for('tasks') }}">

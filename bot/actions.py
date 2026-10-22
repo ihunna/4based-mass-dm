@@ -657,7 +657,7 @@ class Creator:
 				if len(captions) < 1: raise ValueError('Captions can not be empty')
 		elif caption_source == 'pool':
 			captions = [line for line in config.get('caption_pool') or [] if line]
-			if len(captions) < 1: raise ValueError('Follow-up caption pool can not be empty')
+			if len(captions) < 1: raise ValueError('Caption pool can not be empty')
 
 		if len(session_data.get('headers') or {}) < 1 or len(session_data.get('cookies') or {}) < 1:
 			raise Exception(f'User {creator_name} does not have session data')

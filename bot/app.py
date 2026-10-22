@@ -510,6 +510,7 @@ def handle_messages():
             'price': data.get('message-price'),
             'caption': str(data.get('message-caption', '')).replace('\n', ''),
             'caption_source': data.get('message-caption-source'),
+            'caption_pool': [line.strip() for line in str(data.get('follow-up-pool', '')).splitlines() if line.strip()],
             'creators_source': data.get('creators-source'),
             'cost_type': data.get('message-cost-type', 'free'),
             'selected_creators': data.get('select-creators', []),
@@ -519,6 +520,8 @@ def handle_messages():
             'time_between': int(data.get('time-between-actions', '3600')),
             'proxy_flush': True if str(data.get('proxy-flush', 'no')).lower() == 'yes' else False
         }
+        if message_data['caption_source'] == 'pool' and not message_data['caption_pool']:
+            return jsonify({'msg': 'Add at least one message to the pool'}), 400
 
         task_id = str(uuid.uuid4()).upper()[:8]
         task_data = {
