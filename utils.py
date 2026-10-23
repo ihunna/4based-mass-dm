@@ -181,7 +181,7 @@ class Utils:
 			
 			cursor.execute('''
 				CREATE TABLE IF NOT EXISTS users (
-					id TEXT PRIMARY KEY,
+					id TEXT NOT NULL,
 					admin TEXT,
 					username TEXT,
 					commented_at TEXT,
@@ -189,8 +189,37 @@ class Utils:
 					created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 					status TEXT DEFAULT 'active',
 					spent INTEGER DEFAULT 0,
-					category TEXT DEFAULT 'scraped'
+					category TEXT DEFAULT 'scraped',
+					PRIMARY KEY (id, admin)
 				)''')
+
+			# Older installations keyed users globally by platform user ID.  That
+			# prevented a second admin from saving the same scraped user.  Preserve
+			# existing rows while upgrading to one user record per admin account.
+			columns = cursor.execute("PRAGMA table_info(users)").fetchall()
+			primary_key_columns = [column[1] for column in columns if column[5]]
+			if primary_key_columns == ['id']:
+				cursor.execute('''
+					CREATE TABLE users_scoped (
+						id TEXT NOT NULL,
+						admin TEXT NOT NULL,
+						username TEXT,
+						commented_at TEXT,
+						task_id TEXT,
+						created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+						status TEXT DEFAULT 'active',
+						spent INTEGER DEFAULT 0,
+						category TEXT DEFAULT 'scraped',
+						PRIMARY KEY (id, admin)
+					)''')
+				cursor.execute('''
+					INSERT OR IGNORE INTO users_scoped
+					(id, admin, username, commented_at, task_id, created_at, status, spent, category)
+					SELECT id, admin, username, commented_at, task_id, created_at, status, spent, category
+					FROM users
+				''')
+				cursor.execute('DROP TABLE users')
+				cursor.execute('ALTER TABLE users_scoped RENAME TO users')
 			
 			conn.commit()
 			
@@ -539,6 +568,7 @@ class Utils:
 						'id': row[0], 
 						'email': row[1],
 						'data': json.loads(row[2]),
+						'category': row[4],
 						'created_at': row[6]
 					} if row is not None else {}
 
@@ -679,21 +709,23 @@ class Utils:
 		return Utils.get_task(task_id)
 	
 	@staticmethod
-	def get_tasks(admin='', limit=20, offset=0, constraint=None, keyword=None):
+	def get_tasks(admin='', limit=20, offset=0, constraint=None, keyword=None, all_admins=False):
 		success, tasks, total_tasks = True, [], 0
 		conn = sqlite3.connect(db_file)
 		cursor = conn.cursor()
 		try:
 			if constraint is not None and keyword is not None:
-				cursor.execute(f"SELECT COUNT(*) FROM tasks WHERE {constraint} = ? AND admin = ?", (keyword, admin))
+				admin_filter = '' if all_admins else ' AND admin = ?'
+				params = (keyword,) if all_admins else (keyword, admin)
+				cursor.execute(f"SELECT COUNT(*) FROM tasks WHERE {constraint} = ?{admin_filter}", params)
 				total_tasks = cursor.fetchone()[0]
 
 				cursor.execute(
 					f"""SELECT * FROM tasks 
-					WHERE {constraint} = ? AND admin = ?
+					WHERE {constraint} = ?{admin_filter}
 					ORDER BY created_at DESC 
 					LIMIT ? OFFSET ?""",
-					(keyword, admin, limit, offset)
+					(*params, limit, offset)
 				)
 				rows = cursor.fetchall()
 
@@ -709,10 +741,12 @@ class Utils:
 				} for row in rows]
 			else:
 
-				cursor.execute("SELECT COUNT(*) FROM tasks WHERE admin = ?", (admin,))
+				where = '' if all_admins else ' WHERE admin = ?'
+				params = () if all_admins else (admin,)
+				cursor.execute(f"SELECT COUNT(*) FROM tasks{where}", params)
 				total_tasks = cursor.fetchone()[0]
 
-				cursor.execute("SELECT * FROM tasks WHERE admin = ? ORDER BY created_at DESC LIMIT ? OFFSET ?", (admin, limit, offset))
+				cursor.execute(f"SELECT * FROM tasks{where} ORDER BY created_at DESC LIMIT ? OFFSET ?", (*params, limit, offset))
 				rows = cursor.fetchall()
 
 				tasks = [{
@@ -795,24 +829,28 @@ class Utils:
 		
 
 	@staticmethod
-	def get_messages(limit=20, offset=0, admin=None, multiple=True, message_id=None, keyword=None, constraint=None):
+	def get_messages(limit=20, offset=0, admin=None, multiple=True, message_id=None, keyword=None, constraint=None, all_admins=False):
 		success, messages, total_messages = True, [], 0
 		conn = sqlite3.connect(db_file)
 		cursor = conn.cursor()
 		try:
 			if multiple:
 				if constraint is not None and keyword is not None:
-					cursor.execute(f"SELECT COUNT(*) FROM messages WHERE {constraint} = ? AND admin = ?", (keyword, admin))
+					admin_filter = '' if all_admins else ' AND admin = ?'
+					params = (keyword,) if all_admins else (keyword, admin)
+					cursor.execute(f"SELECT COUNT(*) FROM messages WHERE {constraint} = ?{admin_filter}", params)
 					total_messages = cursor.fetchone()[0]
 					cursor.execute(
 						f"""SELECT * FROM messages \
-						WHERE {constraint} = ? AND admin = ?
+						WHERE {constraint} = ?{admin_filter}
 						ORDER BY created_at DESC \
-					LIMIT ? OFFSET ?""", (keyword, admin, limit, offset))
+					LIMIT ? OFFSET ?""", (*params, limit, offset))
 				else:
-					cursor.execute("SELECT COUNT(*) FROM messages WHERE admin = ?", (admin,))
+					where = '' if all_admins else ' WHERE admin = ?'
+					params = () if all_admins else (admin,)
+					cursor.execute(f"SELECT COUNT(*) FROM messages{where}", params)
 					total_messages = cursor.fetchone()[0]
-					cursor.execute("SELECT * FROM messages WHERE admin = ? ORDER BY created_at DESC LIMIT ? OFFSET ?", (admin, limit, offset))
+					cursor.execute(f"SELECT * FROM messages{where} ORDER BY created_at DESC LIMIT ? OFFSET ?", (*params, limit, offset))
 
 				rows = cursor.fetchall()
 				messages = [{
@@ -925,7 +963,7 @@ class Utils:
 			if category not in ('scraped', 'uploaded', 'creator'):
 				category = 'scraped'
 			cursor.execute(
-				"INSERT INTO users (id, admin, username, commented_at, task_id, category) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+				"INSERT INTO users (id, admin, username, commented_at, task_id, category) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id, admin) DO NOTHING",
 				(user_id, admin, username, commented_at, task_id, category)
 			)
 			conn.commit()
@@ -952,12 +990,15 @@ class Utils:
 			return success, msg
 
 	@staticmethod
-	def delete_user(user_id):
+	def delete_user(user_id, admin=None):
 		success, msg = False, ''
 		conn = sqlite3.connect(db_file)
 		cursor = conn.cursor()
 		try:
-			cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+			if admin is None:
+				cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+			else:
+				cursor.execute('DELETE FROM users WHERE id = ? AND admin = ?', (user_id, admin))
 			conn.commit()
 			success, msg = True, 'User deleted successfully'
 		except Exception as error:
@@ -973,39 +1014,39 @@ class Utils:
 		cursor = conn.cursor()
 		try:
 			if constraint is not None and keyword is not None:
-				cursor.execute(f"SELECT COUNT(*) FROM users WHERE {constraint} = ? AND admin = ?", (keyword, admin))
+				cursor.execute(f"SELECT COUNT(*) FROM users WHERE {constraint} = ?", (keyword,))
 				total_users = cursor.fetchone()[0]
 				cursor.execute(
 					f"""SELECT * FROM users
-					WHERE {constraint} = ? AND admin = ?
+					WHERE {constraint} = ?
 					ORDER BY created_at DESC
 					LIMIT ? OFFSET ?""",
-					(keyword, admin, limit, offset)
+					(keyword, limit, offset)
 				)
 				rows = cursor.fetchall()
 			elif category in ['scraped', 'uploaded', 'creator']:
-				cursor.execute("SELECT COUNT(*) FROM users WHERE admin = ? AND category = ?", (admin, category))
+				cursor.execute("SELECT COUNT(*) FROM users WHERE category = ?", (category,))
 				total_users = cursor.fetchone()[0]
 				cursor.execute(
-					"SELECT * FROM users WHERE admin = ? AND category = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-					(admin, category, limit, offset)
+					"SELECT * FROM users WHERE category = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+					(category, limit, offset)
 				)
 				rows = cursor.fetchall()
 			elif recipient_type in ('users', 'creators'):
 				category_sql = "COALESCE(category, 'scraped') = 'creator'" if recipient_type == 'creators' else "COALESCE(category, 'scraped') != 'creator'"
-				cursor.execute(f"SELECT COUNT(*) FROM users WHERE admin = ? AND {category_sql}", (admin,))
+				cursor.execute(f"SELECT COUNT(*) FROM users WHERE {category_sql}")
 				total_users = cursor.fetchone()[0]
 				cursor.execute(
-					f"SELECT * FROM users WHERE admin = ? AND {category_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-					(admin, limit, offset)
+					f"SELECT * FROM users WHERE {category_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+					(limit, offset)
 				)
 				rows = cursor.fetchall()
 			else:
-				cursor.execute("SELECT COUNT(*) FROM users WHERE admin = ?", (admin,))
+				cursor.execute("SELECT COUNT(*) FROM users")
 				total_users = cursor.fetchone()[0]
 				cursor.execute(
-					"SELECT * FROM users WHERE admin = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-					(admin, limit, offset)
+					"SELECT * FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?",
+					(limit, offset)
 				)
 				rows = cursor.fetchall()
 
@@ -1036,11 +1077,7 @@ class Utils:
 				return True, []
 			placeholders = ",".join(["?"] * len(user_ids))
 			params = list(user_ids)
-			if admin is not None:
-				query = f"SELECT id FROM users WHERE id IN ({placeholders}) AND admin = ?"
-				params.append(admin)
-			else:
-				query = f"SELECT id FROM users WHERE id IN ({placeholders})"
+			query = f"SELECT id FROM users WHERE id IN ({placeholders})"
 			cursor.execute(query, params)
 			existing = [row[0] for row in cursor.fetchall()]
 		except Exception as error:
@@ -1050,7 +1087,7 @@ class Utils:
 			return success, existing
 
 	@staticmethod
-	def get_unmessaged_users(creator_id, limit=50, offset=0, recipient_type='users', shard_index=None, shard_count=None):
+	def get_unmessaged_users(creator_id, admin, limit=50, offset=0, recipient_type='users', shard_index=None, shard_count=None):
 		try:
 			conn = sqlite3.connect(db_file)
 			cursor = conn.cursor()
@@ -1180,6 +1217,3 @@ class Utils:
 			if value is None or not value or len(value) < 1:
 				return False
 		else:return True
-
-
-

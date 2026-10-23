@@ -866,7 +866,7 @@ class Creator:
 
 				users, found_users = [], 0
 				while found_users < maxworkers:
-					success, new_users = Utils.get_unmessaged_users(creator_internal_id, limit=maxworkers, offset=offset, recipient_type=recipient_type, shard_index=shard_index, shard_count=shard_count)
+					success, new_users = Utils.get_unmessaged_users(creator_internal_id, admin, limit=maxworkers, offset=offset, recipient_type=recipient_type, shard_index=shard_index, shard_count=shard_count)
 					if not success:raise Exception(new_users)
 					if not new_users:break
 					users.extend(new_users)

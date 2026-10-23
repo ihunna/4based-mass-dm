@@ -532,7 +532,8 @@
                                 </div>
                                 <div class="table-cell badge">
                                     <span class="bg-success">
-                                        {{message.creator_name|capitalize}}
+                                    {{message.creator_name|capitalize}}
+                                    {% if session.USER.role == 'super-admin' %}<small>({{ message.admin }})</small>{% endif %}
                                     </span>
                                 </div>                             
                                 <div class="table-cell ">${{ message.price }}</div>

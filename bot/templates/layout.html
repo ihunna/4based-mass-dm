@@ -54,21 +54,23 @@
                             <i class="fas fa-user"></i> Creators
                         </a>
                     </li>
-                     <li class="{%if g.page == 'users'%} active {%endif%}">
-                        <a href="{{ url_for('creators', category='users') }}">
-                            <i class="fas fa-user"></i> users
-                        </a>
-                    </li>
-                    <li class="{%if g.page in ['admins','edit-admin']%} active {%endif%}">
-                        <a href="{{ url_for('admins') }}">
-                            <i class="fas fa-user"></i> Admins
-                        </a>
-                    </li>
-                    <li class="{%if g.page == 'configs'%} active {%endif%}">
-                        <a href="{{ url_for('configs') }}">
-                            <i class="fas fa-cog"></i> Configs
-                        </a>
-                    </li>
+                    {% if session.USER and session.USER.role == 'super-admin' %}
+                        <li class="{%if g.page == 'users'%} active {%endif%}">
+                            <a href="{{ url_for('creators', category='users') }}">
+                                <i class="fas fa-user"></i> users
+                            </a>
+                        </li>
+                        <li class="{%if g.page in ['admins','edit-admin']%} active {%endif%}">
+                            <a href="{{ url_for('admins') }}">
+                                <i class="fas fa-user"></i> Admins
+                            </a>
+                        </li>
+                        <li class="{%if g.page == 'configs'%} active {%endif%}">
+                            <a href="{{ url_for('configs') }}">
+                                <i class="fas fa-cog"></i> Configs
+                            </a>
+                        </li>
+                    {% endif %}
                 </ul>
             </div>
             <div class="content scroll scroll-v">

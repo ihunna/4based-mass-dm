@@ -185,7 +185,7 @@ def last_seen(value):
     timestamp = value.strftime('%Y-%m-%d %H:%M:%S')
     last_seen_time = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
     current_time = datetime.now()
-    
+
     time_difference = current_time - last_seen_time
 
     hours, remainder = divmod(time_difference.seconds, 3600)
@@ -220,14 +220,14 @@ def login_required(func):
     return decorated_function
 
 def check_role(func):
+    """Restrict a route to super admins, including direct endpoint calls."""
     @wraps(func)
     def decorated_function(*args, **kwargs):
         user = session.get('USER')
-        if user['role'] != 'super-admin':
+        if not user or user.get('role') != 'super-admin':
             if request.method == 'GET':
-                return redirect(url_for('admins'))
-            elif request.method in ['POST', 'DELETE', 'PUT', 'PATCH']:
-                return jsonify({'msg': 'You must be a super admin to update a user'}), 403
+                return redirect(url_for('index'))
+            return jsonify({'msg': 'This area is restricted to super admins'}), 403
         return func(*args, **kwargs)
     return decorated_function
     
@@ -248,6 +248,3 @@ def logout():
         return session.modified,'Logout successful'
     except Exception as error:
         return False,error
-    
-
-    

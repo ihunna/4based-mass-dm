@@ -31,6 +31,7 @@
                                 </div>
                                 <div class="table-cell">
                                     {{ task.id }}
+                                    {% if session.USER.role == 'super-admin' %}<small>({{ task.admin }})</small>{% endif %}
                               </div>  
                                 <div class="table-cell badge double-cell">
                                     {%if task.type == 'messages'%}
@@ -104,7 +105,8 @@
                                 </div>
                                 <div class="table-cell">
                                     {{ task.id }}
-                              </div>  
+                                    {% if session.USER.role == 'super-admin' %}<small>({{ task.admin }})</small>{% endif %}
+                                    </div>
                                 <div class="table-cell badge double-cell">{{ task.type}}</div> 
                                 <div class="table-cell">{{ task.action_count}}</div>                             
                                 <div class="table-cell badge double-cell">{{ task.created_at}}</div>
