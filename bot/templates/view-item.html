@@ -106,40 +106,25 @@
                             ID: {{item.id}}
                         </div>
                     </div>
-                    <ul>
-                        <li>
-                            <strong>Email:</strong>
-                            <span>{{item.email}}</span>
-                        </li>
-                        <li>
-                            <strong>Role:</strong>
-                            <span>{{item.role}}</span>
-                        </li>
-                        <li>
-                            <strong>Status:</strong>
-                            <span>{{item.status}}</span>
-                        </li>
-                        <li>
-                            <strong>Created date:</strong>
-                            <span>{{item.created_at}}</span>
-                        </li>
-                        <li>
-                            <strong>Tasks created:</strong>
-                            <span>{{ activity.tasks_created }}</span>
-                        </li>
-                        <li>
-                            <strong>Messages sent:</strong>
-                            <span>{{ activity.messages_sent }}</span>
-                        </li>
-                    </ul>
-                    {% if activity.task_counts %}
-                        <h3>Task activity</h3>
-                        <ul>
+                    <div class="table-container admin-activity-table">
+                        <div class="table-header">
+                            <div class="table-row">
+                                <div class="table-cell">Activity</div>
+                                <div class="table-cell">Count / value</div>
+                            </div>
+                        </div>
+                        <div class="table-body">
+                            <div class="table-row"><div class="table-cell">Email</div><div class="table-cell">{{ item.email }}</div></div>
+                            <div class="table-row"><div class="table-cell">Role</div><div class="table-cell">{{ item.role }}</div></div>
+                            <div class="table-row"><div class="table-cell">Status</div><div class="table-cell">{{ item.status }}</div></div>
+                            <div class="table-row"><div class="table-cell">Created date</div><div class="table-cell">{{ item.created_at }}</div></div>
+                            <div class="table-row"><div class="table-cell">Tasks created</div><div class="table-cell">{{ activity.tasks_created }}</div></div>
+                            <div class="table-row"><div class="table-cell">Messages sent</div><div class="table-cell">{{ activity.messages_sent }}</div></div>
                             {% for task in activity.task_counts %}
-                                <li><strong>{{ task.type|capitalize }}:</strong> <span>{{ task.count }}</span></li>
+                                <div class="table-row"><div class="table-cell">{{ task.type|replace('-', ' ')|capitalize }} tasks</div><div class="table-cell">{{ task.count }}</div></div>
                             {% endfor %}
-                        </ul>
-                    {% endif %}
+                        </div>
+                    </div>
                 </div>
             </section>
         {%endif%}
