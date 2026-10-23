@@ -123,8 +123,23 @@
                             <strong>Created date:</strong>
                             <span>{{item.created_at}}</span>
                         </li>
-                    
+                        <li>
+                            <strong>Tasks created:</strong>
+                            <span>{{ activity.tasks_created }}</span>
+                        </li>
+                        <li>
+                            <strong>Messages sent:</strong>
+                            <span>{{ activity.messages_sent }}</span>
+                        </li>
                     </ul>
+                    {% if activity.task_counts %}
+                        <h3>Task activity</h3>
+                        <ul>
+                            {% for task in activity.task_counts %}
+                                <li><strong>{{ task.type|capitalize }}:</strong> <span>{{ task.count }}</span></li>
+                            {% endfor %}
+                        </ul>
+                    {% endif %}
                 </div>
             </section>
         {%endif%}

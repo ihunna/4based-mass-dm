@@ -124,7 +124,11 @@ def admins():
             item = request.args.get('admin')
             
             success, admin,_ = Utils.get_admins(multiple=False,keyword='id',admin=item)
-            if success:return render_template('view-item.html', type='admin', item=admin)
+            if success:
+                success, activity = Utils.get_admin_activity_summary(item)
+                if not success:
+                    raise Exception(activity)
+                return render_template('view-item.html', type='admin', item=admin, activity=activity)
 
             Utils.write_log(admin)
             return render_template('view-item.html', action=404)

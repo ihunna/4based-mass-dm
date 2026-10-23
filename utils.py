@@ -349,6 +349,29 @@ class Utils:
 			conn.close()
 			return success, admins, total_admins
 
+	@staticmethod
+	def get_admin_activity_summary(admin_id):
+		"""Return a compact activity breakdown for the admin detail page."""
+		conn = sqlite3.connect(db_file)
+		cursor = conn.cursor()
+		try:
+			cursor.execute("SELECT COUNT(*) FROM messages WHERE admin = ?", (admin_id,))
+			messages_sent = cursor.fetchone()[0]
+			cursor.execute(
+				"SELECT type, COUNT(*) FROM tasks WHERE admin = ? GROUP BY type ORDER BY type",
+				(admin_id,)
+			)
+			task_counts = [{'type': row[0], 'count': row[1]} for row in cursor.fetchall()]
+			return True, {
+				'messages_sent': messages_sent,
+				'tasks_created': sum(item['count'] for item in task_counts),
+				'task_counts': task_counts,
+			}
+		except Exception as error:
+			return False, str(error)
+		finally:
+			conn.close()
+
 
 	@staticmethod
 	def add_creator(creator_id,creator_email,creator_data,admin,category='creators',task_id=None):
